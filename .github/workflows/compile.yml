@@ -23,7 +23,7 @@ jobs:
           export GOPATH=$PWD/gopath #GOPATH
           export PATH=$GOPATH/bin:$GOROOT/bin:
           go version
-          ln -s ./go/bin/go ./go
+          sudo ln -s ./go/bin/go ./go
           go version
       - name: Compile
         run: |
