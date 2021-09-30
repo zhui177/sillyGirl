@@ -9,4 +9,6 @@ import (
 	 _ "github.com/cdle/sillyGirl/im/qq"
 	 //telegram
 	 _ "github.com/cdle/sillyGirl/im/tg"
+	 //微信
+	 _ "github.com/cdle/sillyGirl/im/wxmp"
 )
