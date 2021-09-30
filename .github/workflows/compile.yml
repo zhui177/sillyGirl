@@ -1,0 +1,20 @@
+name: Compile sillyGirl
+
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: 30 0 * * *
+  watch:
+    types: started
+jobs:
+  run-it:
+    runs-on: ubuntu-latest
+    name: Compile sillyGirl
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@master
+      - name: Install Golang
+        run: ls
+      
