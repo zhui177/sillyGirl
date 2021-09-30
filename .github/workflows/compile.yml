@@ -19,7 +19,8 @@ jobs:
         run: |
           wget https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
           tar -zxf go1.16.8.linux-amd64.tar.gz
-          ls
-          mv go /usr/local/
+          export GOROOT=$PWD/go
+          export GOPATH=$PWD/gopath #GOPATH
+          export PATH=$GOPATH/bin:$GOROOT/bin:
           go version
           
