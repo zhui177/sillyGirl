@@ -15,16 +15,13 @@ jobs:
     steps:
       - name: Checkout master
         uses: actions/checkout@master
-      - name: Install Golang
+      - name: Install Golang and Compile
         run: |
           wget -q https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
           tar -zxf go1.16.8.linux-amd64.tar.gz
           export GOROOT=$PWD/go
           export GOPATH=$PWD/gopath #GOPATH
           export PATH=$GOPATH/bin:$GOROOT/bin:
-          go version
-      - name: Compile
-        run: |
           go version
           CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -o sillyGirl-linux-386
           CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags "-s -w" -o sillyGirl-linux-386-min
