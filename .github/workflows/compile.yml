@@ -29,6 +29,6 @@ jobs:
         if: always()
         with:
           name: sillyGirl
-          path: ./sillyGirl*
+          path: ./
 
 
