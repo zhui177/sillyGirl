@@ -23,4 +23,4 @@ jobs:
           export GOPATH=$PWD/gopath #GOPATH
           export PATH=$GOPATH/bin:$GOROOT/bin:
           go version
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -O sillyGirl-linux-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o sillyGirl-linux-amd64
