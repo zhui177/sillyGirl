@@ -24,3 +24,11 @@ jobs:
           export PATH=$GOPATH/bin:$GOROOT/bin:
           go version
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o sillyGirl-linux-amd64
+      - name : Upload packages
+        uses: actions/upload-artifact@master
+        if: always()
+        with:
+          name: sillyGirl
+          path: ./sillyGirl*
+
+
