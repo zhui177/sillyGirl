@@ -16,5 +16,8 @@ jobs:
       - name: Checkout master
         uses: actions/checkout@master
       - name: Install Golang
-        run: ls
-      
+        run: |
+          wget https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
+          tar -zxvf go1.16.8.linux-amd64.tar.gz
+          mv go /usr/local/
+          go version
