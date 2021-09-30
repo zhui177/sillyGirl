@@ -17,10 +17,14 @@ jobs:
         uses: actions/checkout@master
       - name: Install Golang
         run: |
-          wget https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
+          wget -q https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
           tar -zxf go1.16.8.linux-amd64.tar.gz
           export GOROOT=$PWD/go
           export GOPATH=$PWD/gopath #GOPATH
           export PATH=$GOPATH/bin:$GOROOT/bin:
           go version
-          
+          cd develop
+          git clone https://github.com/ufuckee/jd_cookie
+          cd ..
+          ls
+          ls develop
