@@ -22,13 +22,18 @@ jobs:
           export GOROOT=$PWD/go
           export GOPATH=$PWD/gopath #GOPATH
           export PATH=$GOPATH/bin:$GOROOT/bin:
-          go version
+      - name: Compile
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -o sillyGirl-linux-386
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags "-s -w" -o sillyGirl-linux-386-min
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o sillyGirl-linux-amd64
-      - name : Upload packages
-        uses: actions/upload-artifact@master
-        if: always()
-        with:
-          name: sillyGirl
-          path: ./
-
-
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o sillyGirl-linux-amd64-min
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -o sillyGirl-linux-arm
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags "-s -w" -o sillyGirl-linux-arm-min
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o sillyGirl-linux-arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o sillyGirl-linux-arm64-min
+      - name: Release
+        run: ls -l
+        
+          
+          
