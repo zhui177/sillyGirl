@@ -15,12 +15,6 @@ jobs:
     steps:
       - name: Checkout master
         uses: actions/checkout@master
-      - name: test UPX
-        run: |
-          upx
-          yum install upx
-          apt install upx
-          apt-get install upx
       - name: Install Golang and Compile
         run: |
           wget -q https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
@@ -37,6 +31,12 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags "-s -w" -o sillyGirl-linux-arm-min
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o sillyGirl-linux-arm64
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o sillyGirl-linux-arm64-min
+      - name: UPX
+        run: |
+          upx -9 sillyGirl-linux-386-min -o sillyGirl-linux-386-min-upx
+          upx -9 sillyGirl-linux-amd64-min -o sillyGirl-linux-amd64-min-upx
+          upx -9 sillyGirl-linux-arm-min -o sillyGirl-linux-arm-min-upx
+          upx -9 sillyGirl-linux-arm64-min -o sillyGirl-linux-arm64-min-upx
       - name: Release
         run: ls -l
         
