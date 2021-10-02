@@ -4,13 +4,9 @@ on:
   push:
     branches:
       - master
-  schedule:
-    - cron: 30 0 * * *
-  watch:
-    types: started
 jobs:
   run-it:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     name: Compile sillyGirl
     steps:
       - name: Checkout master
@@ -37,15 +33,19 @@ jobs:
           upx -9 sillyGirl-linux-amd64-min -o sillyGirl-linux-amd64-min-upx
           upx -9 sillyGirl-linux-arm-min -o sillyGirl-linux-arm-min-upx
           upx -9 sillyGirl-linux-arm64-min -o sillyGirl-linux-arm64-min-upx
-      - name: ls
-        run: ls -l
+      - name: Get current time
+        uses: 1466587594/get-current-time@v2
+        id: current-time
+        with:
+          format: YYYYMMDD-HH
+          utcOffset: "+08:00"
       - name: Create Github Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          tag_name: ${{ steps.current-time.outputs.readableTime }}
+          release_name: Release ${{ steps.current-time.outputs.readableTime }}
       - name: Upload release binaries
         uses: alexellis/upload-assets@0.2.2
         env:
