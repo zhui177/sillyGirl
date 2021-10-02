@@ -37,8 +37,19 @@ jobs:
           upx -9 sillyGirl-linux-amd64-min -o sillyGirl-linux-amd64-min-upx
           upx -9 sillyGirl-linux-arm-min -o sillyGirl-linux-arm-min-upx
           upx -9 sillyGirl-linux-arm64-min -o sillyGirl-linux-arm64-min-upx
-      - name: Release
+      - name: ls
         run: ls -l
-        
-          
+      - name: Create Github Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+      - name: Upload release binaries
+        uses: alexellis/upload-assets@0.2.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          asset_paths: '["./sillyGirl*"]'
           
