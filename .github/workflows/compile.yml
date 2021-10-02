@@ -1,4 +1,4 @@
-name: Compile sillyGirl
+name: Compile and Release sillyGirl
 
 on:
   push:
