@@ -1,0 +1,55 @@
+name: Compile and Release sillyGirl
+
+on:
+  push:
+    branches:
+      - master
+jobs:
+  run-it:
+    runs-on: ubuntu-latest
+    name: Compile sillyGirl
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@master
+      - name: Install Golang and Compile
+        run: |
+          wget -q https://dl.google.com/go/go1.16.8.linux-amd64.tar.gz
+          tar -zxf go1.16.8.linux-amd64.tar.gz
+          export GOROOT=$PWD/go
+          export GOPATH=$PWD/gopath #GOPATH
+          export PATH=$GOPATH/bin:$GOROOT/bin:
+          go version
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -o sillyGirl-linux-386
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags "-s -w" -o sillyGirl-linux-386-min
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o sillyGirl-linux-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o sillyGirl-linux-amd64-min
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -o sillyGirl-linux-arm
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags "-s -w" -o sillyGirl-linux-arm-min
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o sillyGirl-linux-arm64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o sillyGirl-linux-arm64-min
+      - name: UPX
+        run: |
+          upx -9 sillyGirl-linux-386-min -o sillyGirl-linux-386-min-upx
+          upx -9 sillyGirl-linux-amd64-min -o sillyGirl-linux-amd64-min-upx
+          upx -9 sillyGirl-linux-arm-min -o sillyGirl-linux-arm-min-upx
+          upx -9 sillyGirl-linux-arm64-min -o sillyGirl-linux-arm64-min-upx
+      - name: Get current time
+        uses: 1466587594/get-current-time@v2
+        id: current-time
+        with:
+          format: YYYYMMDD-HH
+          utcOffset: "+08:00"
+      - name: Create Github Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.current-time.outputs.readableTime }}
+          release_name: Release ${{ steps.current-time.outputs.readableTime }}
+      - name: Upload release binaries
+        uses: alexellis/upload-assets@0.2.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          asset_paths: '["./sillyGirl*"]'
+          
