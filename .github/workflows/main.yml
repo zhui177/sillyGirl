@@ -31,17 +31,26 @@ jobs:
           upx -9 sillyGirl-linux-amd64-min -o sillyGirl-linux-amd64-min-upx
           upx -9 sillyGirl-linux-arm-min -o sillyGirl-linux-arm-min-upx
           upx -9 sillyGirl-linux-arm64-min -o sillyGirl-linux-arm64-min-upx
+      - name: Get current time
+        uses: 1466587594/get-current-time@v2
+        id: current-time
+        with:
+          format: YYYY-MM-DD-HH-mm
+          utcOffset: "+08:00"
       - name: Create Github Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v-${{ github.ref }}
-          release_name: Release V-${{ github.ref }}
-      - name: Upload release binaries
-        uses: alexellis/upload-assets@0.2.2
+          tag_name: v-${{ steps.current-time.outputs.formattedTime }}
+          release_name: Release V-${{ steps.current-time.outputs.formattedTime }}
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          asset_paths: '["./sillyGirl*"]'
-          
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ./sillyGirl-linux-amd64
+          asset_name: sillyGirl-linux-amd64
+          asset_content_type: application/binarie
