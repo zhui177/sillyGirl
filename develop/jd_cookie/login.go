@@ -46,7 +46,7 @@ func (sess *Session) create() error {
 		return errors.New("未配置服务器地址，仓库地址：" + url)
 	}
 	req := httplib.Get(address)
-	req.SetTimeout(time.Second, time.Second)
+	req.SetTimeout(time.Second*5, time.Second*5)
 	html, err := req.String()
 	if err != nil {
 		return err
@@ -144,7 +144,14 @@ func (sess *Session) SmsCode(sms_code string) error {
 func (sess *Session) crackCaptcha() error {
 	address := sess.address()
 	req := httplib.Get(fmt.Sprintf("%s/crackCaptcha?clientSessionId=%s", address, sess.String()))
-	req.SetTimeout(time.Second*10, time.Second*10)
+	req.SetTimeout(time.Second*20, time.Second*20)
+	_, err := req.Response()
+	return err
+}
+
+func (sess *Session) releaseSession() error {
+	address := sess.address()
+	req := httplib.Get(fmt.Sprintf("%s/releaseSession?clientSessionId=%s", address, sess.String()))
 	_, err := req.Response()
 	return err
 }
@@ -153,14 +160,22 @@ var codes map[string]chan string
 
 func init() {
 	codes = map[string]chan string{}
+	core.BeforeStop = append(core.BeforeStop, func() {
+		for {
+			if len(codes) == 0 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+	})
 	core.AddCommand("", []core.Function{
 		{
 			Rules: []string{`raw ^(\d{11})$`},
 			Handle: func(s core.Sender) interface{} {
 				s.Delete()
-				if jd_cookie.Get("igtg", false) == "true" && s.GetImType() == "tg" && !s.IsAdmin() {
-					s.Reply("滚，不欢迎你。")
-					return true
+				if groupCode := jd_cookie.GetInt("groupCode"); !s.IsAdmin() && groupCode != 0 && s.GetChatID() != 0 && groupCode != s.GetChatID() {
+					s.Reply("傻妞已崩溃。")
+					return nil
 				}
 				if num := jd_cookie.GetInt("login_num", 2); len(codes) >= num {
 					return fmt.Sprintf("%v坑位全部在使用中，请排队。", num)
@@ -169,7 +184,6 @@ func init() {
 				if _, ok := codes[id]; ok {
 					return "你已在登录中。"
 				}
-
 				c := make(chan string, 1)
 				codes[id] = c
 				var sess = new(Session)
@@ -181,7 +195,8 @@ func init() {
 				}
 				go func() {
 					defer delete(codes, id)
-					s.Reply("请稍后，正在模拟环境...", core.E)
+					defer sess.releaseSession()
+					s.Reply("请稍后，正在请求资源...", core.E)
 					for {
 						query, err := sess.query()
 						if err != nil {
@@ -207,9 +222,15 @@ func init() {
 					success := false
 					sms_code := ""
 					for {
-						query, _ := sess.query()
+						query, err := sess.query()
+						if err != nil {
+							s.Reply(err, core.E)
+							return
+						}
 						if query.PageStatus == "SESSION_EXPIRED" {
-							s.Reply(errors.New("登录超时。"), core.E)
+							if !login {
+								s.Reply(errors.New("登录超时。"), core.E)
+							}
 							return
 						}
 						if query.SessionTimeOut == 0 {
@@ -227,36 +248,53 @@ func init() {
 							}
 							login = true
 						}
-						if query.PageStatus == "VERIFY_FAILED_MAX" {
-							s.Reply(errors.New("验证码错误次数过多，请重新获取。"), core.E)
-							return
-						}
-						if query.PageStatus == "VERIFY_CODE_MAX" {
-							s.Reply(errors.New("对不起，短信验证码请求频繁，请稍后再试。"), core.E)
-							return
-						}
 						if query.PageStatus == "REQUIRE_VERIFY" && !verify {
 							verify = true
-							s.Reply("正在自动验证...", core.E)
+							s.Reply("正在进行滑块验证...", core.E)
 							if err := sess.crackCaptcha(); err != nil {
 								s.Reply(err, core.E)
 								return
 							}
 							s.Reply("验证通过。", core.E)
 							s.Reply("请输入验证码______", core.E)
-							select {
-							case sms_code = <-c:
-								s.Reply("正在提交验证码...", core.E)
-								if err := sess.SmsCode(sms_code); err != nil {
-									s.Reply(err, core.E)
-									return
+							timeout := 1
+							for {
+								select {
+								case sms_code = <-c:
+									s.Reply("正在提交验证码...", core.E)
+									if err := sess.SmsCode(sms_code); err != nil {
+										s.Reply(err, core.E)
+										return
+									}
+									s.Reply("验证码提交成功。", core.E)
+									goto HELL
+								case <-time.After(time.Millisecond * 300):
+									query, err := sess.query()
+									if err != nil {
+										s.Reply(err, core.E)
+										return
+									}
+									if query.PageStatus == "SESSION_EXPIRED" {
+										goto HELL
+									}
+									if query.PageStatus == "VERIFY_FAILED_MAX" {
+										s.Reply("验证码错误次数过多，请重新获取。", core.E)
+										return
+									}
+									if query.PageStatus == "VERIFY_CODE_MAX" || query.PageStatus == "SWITCH_SMS_LOGIN" {
+										s.Reply("对不起，短信验证码请求频繁，请稍后再试。", core.E)
+										return
+									}
+									if query.AuthCodeCountDown <= 0 {
+										timeout++
+										if timeout > 20 {
+											s.Reply("验证码超时，登录失败。", core.E)
+											return
+										}
+									}
 								}
-								s.Reply("验证码提交成功。", core.E)
-							case <-time.After(60 * time.Second):
-								s.Reply("验证码超时。", core.E)
-								return
-
 							}
+						HELL:
 						}
 						if query.CanSendAuth && !send {
 							if err := sess.sendAuthCode(); err != nil {
@@ -272,13 +310,20 @@ func init() {
 
 						}
 						if query.PageStatus == "SUCCESS_CK" && !success {
+							cookie := fmt.Sprintf("pt_key=%v;pt_pin=%v;", query.Ck.PtKey, query.Ck.PtPin)
+							qq := ""
+							if s.GetImType() == "qq" {
+								qq = fmt.Sprint(s.GetUserID())
+							}
+							xdd(cookie, qq)
 							core.Senders <- &core.Faker{
-								Message: fmt.Sprintf("pt_key=%v;pt_pin=%v;", query.Ck.PtKey, query.Ck.PtPin),
+								Message: cookie,
 								UserID:  s.GetUserID(),
 								Type:    s.GetImType(),
 							}
-							s.Reply(fmt.Sprintf("登录成功，%v秒后可以登录下一个账号。", query.SessionTimeOut), core.E)
+							s.Reply("登录成功，你可以登录下一个账号。", core.E)
 							success = true
+							return
 						}
 						time.Sleep(time.Second)
 					}
@@ -292,6 +337,12 @@ func init() {
 		{
 			Rules: []string{`raw ^登录$`},
 			Handle: func(s core.Sender) interface{} {
+				if groupCode := jd_cookie.GetInt("groupCode"); !s.IsAdmin() && groupCode != 0 && s.GetChatID() != 0 && groupCode != s.GetChatID() {
+					s.Delete()
+					s.Disappear()
+					s.Reply("我崩溃了。")
+					return nil
+				}
 				if num := jd_cookie.GetInt("login_num", 2); len(codes) >= num {
 					return fmt.Sprintf("%v坑位全部在使用中，请排队(稍后再试)。", num)
 				}
@@ -329,7 +380,7 @@ func init() {
 						s.Reply("八九不离十登录成功了，一分钟后对我说\"查询\"确认是否登录成功。")
 					}
 				} else {
-					s.Reply("验证码不存在或过期了，请重新登录。")
+					s.Reply("验证码不存在或过期了。")
 				}
 				return nil
 			},

@@ -33,9 +33,9 @@ var ua = `Mozilla/5.0 (iPhone; U; CPU iPhone OS 4_3_2 like Mac OS X; en-us) Appl
 
 var assets sync.Map
 var queryAssetLocker sync.Mutex
-var getAsset = func(ck *JdCookie) string {
+var GetAsset = func(ck *JdCookie) string {
 	if asset, ok := assets.Load(ck.PtPin); ok {
-		return asset.(string) + "\n(结果来自缓存，10分钟后更新。)"
+		return asset.(string)
 	}
 	queryAssetLocker.Lock()
 	defer queryAssetLocker.Unlock()
@@ -58,7 +58,7 @@ func init() {
 		}
 	}()
 	get := func(c chan string, ck JdCookie) {
-		c <- getAsset(&ck)
+		c <- GetAsset(&ck)
 		return
 	}
 	core.AddCommand("jd", []core.Function{
@@ -70,6 +70,9 @@ func init() {
 					s.Disappear(time.Second * 40)
 				}
 				a := s.Get()
+				if a == "300" {
+					a = "3"
+				}
 				envs, err := qinglong.GetEnvs("JD_COOKIE")
 				if err != nil {
 					return err
@@ -107,7 +110,7 @@ func init() {
 					s.Reply(strings.Join(rt, "\n\n"))
 				} else {
 					for _, ck := range cks {
-						s.Reply(getAsset(&ck))
+						s.Reply(GetAsset(&ck))
 					}
 				}
 				return nil
@@ -115,7 +118,7 @@ func init() {
 		},
 		{
 			Rules: []string{`raw ^资产推送$`},
-			Cron:  "40 21 * * *",
+			// Cron:  "40 21 * * *",
 			Admin: true,
 			Handle: func(_ core.Sender) interface{} {
 				envs, _ := qinglong.GetEnvs("JD_COOKIE")
@@ -124,11 +127,11 @@ func init() {
 					pt_key := core.FetchCookieValue(env.Value, "pt_key")
 
 					for _, tp := range []string{
-						"qq", "tg", "wxmp",
+						"qq", "tg",
 					} {
 						core.Bucket("pin" + strings.ToUpper(tp)).Foreach(func(k, v []byte) error {
 							if string(k) == pt_pin && pt_pin != "" {
-								core.Push(tp, core.Int(string(v)), getAsset(&JdCookie{
+								core.Push(tp, core.Int(string(v)), GetAsset(&JdCookie{
 									PtPin: pt_pin,
 									PtKey: pt_key,
 								}))
@@ -171,7 +174,7 @@ func init() {
 					})
 				}
 				if len(cks) == 0 {
-					return "你尚未绑定🐶东账号，请私聊我你的账号信息。"
+					return "你尚未绑定🐶东账号，请私聊我你的账号信息或者对我说“登录”。"
 				}
 				if s.GetImType() == "wxmp" {
 					cs := []chan string{}
@@ -187,7 +190,7 @@ func init() {
 					s.Reply(strings.Join(rt, "\n\n"))
 				} else {
 					for _, ck := range cks {
-						s.Reply(getAsset(&ck))
+						s.Reply(GetAsset(&ck))
 					}
 				}
 				return nil
@@ -386,9 +389,7 @@ var Float64 = func(s string) float64 {
 func (ck *JdCookie) QueryAsset() string {
 	msgs := []string{}
 	if ck.Note != "" {
-		if runtime.GOOS != "darwin" {
-			msgs = append(msgs, fmt.Sprintf("账号备注：%s", ck.Note))
-		}
+		msgs = append(msgs, fmt.Sprintf("账号备注：%s", ck.Note))
 	}
 	asset := Asset{}
 	if ck.Available() {
@@ -417,12 +418,26 @@ func (ck *JdCookie) QueryAsset() string {
 		end := false
 		for {
 			if end {
-				msgs = append(msgs, []string{
-					fmt.Sprintf("昨日收入：%d京豆", asset.Bean.YestodayIn),
-					fmt.Sprintf("昨日支出：%d京豆", asset.Bean.YestodayOut),
-					fmt.Sprintf("今日收入：%d京豆", asset.Bean.TodayIn),
-					fmt.Sprintf("今日支出：%d京豆", asset.Bean.TodayOut),
-				}...)
+				if asset.Bean.YestodayIn != 0 {
+					msgs = append(msgs,
+						fmt.Sprintf("昨日收入：%d京豆", asset.Bean.YestodayIn),
+					)
+				}
+				if asset.Bean.YestodayOut != 0 {
+					msgs = append(msgs,
+						fmt.Sprintf("昨日支出：%d京豆", asset.Bean.YestodayOut),
+					)
+				}
+				if asset.Bean.TodayIn != 0 {
+					msgs = append(msgs,
+						fmt.Sprintf("今日收入：%d京豆", asset.Bean.TodayIn),
+					)
+				}
+				if asset.Bean.TodayOut != 0 {
+					msgs = append(msgs,
+						fmt.Sprintf("今日支出：%d京豆", asset.Bean.TodayOut),
+					)
+				}
 				break
 			}
 			bds := getJingBeanBalanceDetail(page, cookie)
@@ -491,55 +506,75 @@ func (ck *JdCookie) QueryAsset() string {
 				}
 				return ""
 			}
-			msgs = append(msgs, []string{
-				fmt.Sprintf("所有红包：%.2f%s元🧧", asset.RedPacket.Total, e(asset.RedPacket.ToExpire)),
-				fmt.Sprintf("京喜红包：%.2f%s元", asset.RedPacket.Jx, e(asset.RedPacket.ToExpireJx)),
-				fmt.Sprintf("极速红包：%.2f%s元", asset.RedPacket.Js, e(asset.RedPacket.ToExpireJs)),
-				// fmt.Sprintf("健康红包：%.2f%s元", asset.RedPacket.Jk, e(asset.RedPacket.ToExpireJk)),
-				fmt.Sprintf("京东红包：%.2f%s元", asset.RedPacket.Jd, e(asset.RedPacket.ToExpireJd)),
-			}...)
+			if asset.RedPacket.Total != 0 {
+				msgs = append(msgs, fmt.Sprintf("所有红包：%.2f%s元🧧", asset.RedPacket.Total, e(asset.RedPacket.ToExpire)))
+				if asset.RedPacket.Jx != 0 {
+					msgs = append(msgs, fmt.Sprintf("京喜红包：%.2f%s元", asset.RedPacket.Jx, e(asset.RedPacket.ToExpireJx)))
+				}
+				if asset.RedPacket.Js != 0 {
+					msgs = append(msgs, fmt.Sprintf("极速红包：%.2f%s元", asset.RedPacket.Js, e(asset.RedPacket.ToExpireJs)))
+				}
+				if asset.RedPacket.Jd != 0 {
+					msgs = append(msgs, fmt.Sprintf("京东红包：%.2f%s元", asset.RedPacket.Jd, e(asset.RedPacket.ToExpireJd)))
+				}
+				if asset.RedPacket.Jk != 0 {
+					msgs = append(msgs, fmt.Sprintf("健康红包：%.2f%s元", asset.RedPacket.Jk, e(asset.RedPacket.ToExpireJk)))
+				}
+			}
+
 		} else {
 			// msgs = append(msgs, "暂无红包数据🧧")
 		}
 		msgs = append(msgs, fmt.Sprintf("东东农场：%s", <-fruit))
 		msgs = append(msgs, fmt.Sprintf("东东萌宠：%s", <-pet))
 		gn := <-gold
-		msgs = append(msgs, fmt.Sprintf("极速金币：%d(≈%.2f元)💰", gn, float64(gn)/10000))
+		if gn >= 30000 {
+			msgs = append(msgs, fmt.Sprintf("极速金币：%d(≈%.2f元)💰", gn, float64(gn)/10000))
+		}
 		zjbn := <-zjb
-		if zjbn != 0 {
+		if zjbn >= 50000 {
 			msgs = append(msgs, fmt.Sprintf("京东赚赚：%d金币(≈%.2f元)💰", zjbn, float64(zjbn)/10000))
 		} else {
-			msgs = append(msgs, fmt.Sprintf("京东赚赚：暂无数据"))
+			// msgs = append(msgs, fmt.Sprintf("京东赚赚：暂无数据"))
 		}
 		mmcCoin := <-mmc
-		if mmcCoin != 0 {
+		if mmcCoin >= 3000 {
 			msgs = append(msgs, fmt.Sprintf("京东秒杀：%d秒秒币(≈%.2f元)💰", mmcCoin, float64(mmcCoin)/1000))
 		} else {
-			msgs = append(msgs, fmt.Sprintf("京东秒杀：暂无数据"))
+			// msgs = append(msgs, fmt.Sprintf("京东秒杀：暂无数据"))
 		}
-		msgs = append(msgs, fmt.Sprintf("推一推券：%s", <-tyt))
-		msgs = append(msgs, fmt.Sprintf("惊喜牧场：%d枚鸡蛋🥚", <-egg))
+		if tyt := <-tyt; tyt != "" {
+			msgs = append(msgs, fmt.Sprintf("推一推券：%s", tyt))
+		}
+		if egg := <-egg; egg != 0 {
+			msgs = append(msgs, fmt.Sprintf("惊喜牧场：%d枚鸡蛋🥚", egg))
+		}
 		// if ck.Note != "" {
 		// 	msgs = append([]string{
 		// 		fmt.Sprintf("账号备注：%s", ck.Note),
 		// 	}, msgs...)
 		// }
 		if runtime.GOOS != "darwin" {
-			msgs = append([]string{
-				fmt.Sprintf("账号昵称：%s", ck.Nickname),
-			}, msgs...)
+			if ck.Nickname != "" {
+				msgs = append([]string{
+					fmt.Sprintf("账号昵称：%s", ck.Nickname),
+				}, msgs...)
+			}
 		}
 	} else {
 		ck.PtPin, _ = url.QueryUnescape(ck.PtPin)
-		if runtime.GOOS != "darwin" {
-			msgs = append(msgs, fmt.Sprintf("京东账号：%s", ck.PtPin))
-		}
+		msgs = append(msgs, fmt.Sprintf("京东账号：%s", ck.PtPin))
 		msgs = append(msgs, []string{
-			"提醒：该账号已过期，请重新登录。多账号的🐑毛党员注意了，登录第2个账号的时候，不可以退出第1个账号，退出会造成账号过期。可以在登录第2个账号前清除浏览器cookie，或者使用浏览器的无痕模式。",
+			// "提醒：该账号已过期，请重新登录。多账号的🐑毛党员注意了，登录第2个账号的时候，不可以退出第1个账号，退出会造成账号过期。可以在登录第2个账号前清除浏览器cookie，或者使用浏览器的无痕模式。",
+			"提醒：该账号已过期，请对我说“登录“。”",
 		}...)
 	}
 	ck.PtPin, _ = url.QueryUnescape(ck.PtPin)
-	return strings.Join(msgs, "\n")
+	rt := strings.Join(msgs, "\n")
+	if jd_cookie.GetBool("tuyalize", false) == true {
+
+	}
+	return rt
 }
 
 type BeanDetail struct {
@@ -1038,7 +1073,7 @@ func tytCoupon(cookie string, state chan string) {
 	req.Header("Referer", "https://st.jingxi.com/my/coupon/jx.shtml?sceneval=2&ptag=7155.1.18")
 	data, _ := req.Bytes()
 	res := regexp.MustCompile(`jsonpCBKB[(](.*)\s+[)];}catch`).FindSubmatch(data)
-	rt := "暂无数据"
+	rt := ""
 	if len(res) > 0 {
 		json.Unmarshal(res[1], &a)
 		num := 0
@@ -1053,7 +1088,7 @@ func tytCoupon(cookie string, state chan string) {
 			}
 		}
 		if num == 0 {
-			rt = "无优惠券"
+			rt = ""
 		} else {
 			rt = fmt.Sprintf("%d张5元优惠券", num)
 			if toexp > 0 {
@@ -1117,18 +1152,18 @@ func (ck *JdCookie) Available() bool {
 	}
 	ui := &UserInfoResult{}
 	if nil != json.Unmarshal(data, ui) {
-		return true
+		return av2(ck)
 	}
 	switch ui.Retcode {
-	case "1001": //ck.BeanNum
-		if ui.Msg == "not login" {
-			return false
-		}
+	// case "1001": //ck.BeanNum
+	// 	if ui.Msg == "not login" {
+	// 		return false
+	// 	}
 	case "0":
 		realPin := url.QueryEscape(ui.Data.UserInfo.BaseInfo.CurPin)
 		if realPin != ck.PtPin {
 			if realPin == "" {
-				return av2(cookie)
+				return av2(ck)
 			} else {
 				ck.PtPin = realPin
 			}
@@ -1141,10 +1176,10 @@ func (ck *JdCookie) Available() bool {
 		}
 		return true
 	}
-	return av2(cookie)
+	return av2(ck)
 }
 
-func av2(cookie string) bool {
+func av2(ck *JdCookie) bool {
 	req := httplib.Get(`https://m.jingxi.com/user/info/GetJDUserBaseInfo?_=1629334995401&sceneval=2&g_login_type=1&g_ty=ls`)
 	req.Header("User-Agent", ua)
 	req.Header("Host", "m.jingxi.com")
@@ -1153,12 +1188,13 @@ func av2(cookie string) bool {
 	req.Header("Accept-Language", "zh-cn")
 	req.Header("Accept-Encoding", "gzip, deflate, br")
 	req.Header("Referer", "https://st.jingxi.com/my/userinfo.html?&ptag=7205.12.4")
-	req.Header("Cookie", cookie)
-	data, err := req.String()
+	req.Header("Cookie", "pt_key="+ck.PtKey+";pt_pin="+ck.PtPin+";")
+	data, err := req.Bytes()
 	if err != nil {
-		return true
+		return false
 	}
-	return !strings.Contains(data, "login")
+	ck.Nickname, _ = jsonparser.GetString(data, "nickname")
+	return ck.Nickname != ""
 }
 
 type UserInfoResult struct {
