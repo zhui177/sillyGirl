@@ -35,15 +35,15 @@ jobs:
         uses: 1466587594/get-current-time@v2
         id: current-time
         with:
-          format: YYYYMMDD-HH
+          format: YYYY-MM-DD-HH-mm
           utcOffset: "+08:00"
       - name: Create Github Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.current-time.outputs.readableTime }}
-          release_name: Release ${{ steps.current-time.outputs.readableTime }}
+          tag_name: v-${{ steps.current-time.outputs.formattedTime }}
+          release_name: Release V-${{ steps.current-time.outputs.formattedTime }}
       - name: Upload release binaries
         uses: alexellis/upload-assets@0.2.2
         env:
