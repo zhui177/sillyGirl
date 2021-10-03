@@ -46,12 +46,123 @@ jobs:
           tag_name: v-${{ steps.current-time.outputs.formattedTime }}
           release_name: Release V-${{ steps.current-time.outputs.formattedTime }}
       - name: Upload Release Asset
-        id: upload-release-asset 
+        id: upload-release-asset1 
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-386
+          asset_name: sillyGirl-linux-386
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset2 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-386-min
+          asset_name: sillyGirl-linux-386-min
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset3 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-386-min-upx
+          asset_name: sillyGirl-linux-386-min-upx
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset4 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./sillyGirl-linux-amd64
           asset_name: sillyGirl-linux-amd64
           asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset5 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-amd64-min
+          asset_name: sillyGirl-linux-amd64-min
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset6 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-amd64-min-upx
+          asset_name: sillyGirl-linux-amd64-min-upx
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset7 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-arm
+          asset_name: sillyGirl-linux-arm
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset8 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-arm-min
+          asset_name: sillyGirl-linux-arm-min
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset9 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-arm-min-upx
+          asset_name: sillyGirl-linux-arm-min-upx
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset10 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-arm64
+          asset_name: sillyGirl-linux-arm64
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset11 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-arm64-min
+          asset_name: sillyGirl-linux-arm64-min
+          asset_content_type: application/binarie
+      - name: Upload Release Asset
+        id: upload-release-asset12 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./sillyGirl-linux-arm64-min-upx
+          asset_name: sillyGirl-linux-arm64-min-upx
+          asset_content_type: application/binarie
+ 
