@@ -38,6 +38,7 @@ jobs:
           format: YYYY-MM-DD-HH-mm
           utcOffset: "+08:00"
       - name: Create Github Release
+        id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
