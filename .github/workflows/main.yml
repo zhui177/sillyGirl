@@ -31,19 +31,13 @@ jobs:
           upx -9 sillyGirl-linux-amd64-min -o sillyGirl-linux-amd64-min-upx
           upx -9 sillyGirl-linux-arm-min -o sillyGirl-linux-arm-min-upx
           upx -9 sillyGirl-linux-arm64-min -o sillyGirl-linux-arm64-min-upx
-      - name: Get current time
-        uses: 1466587594/get-current-time@v2
-        id: current-time
-        with:
-          format: YYYY-MM-DD-HH-mm
-          utcOffset: "+08:00"
       - name: Create Github Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v-${{ github.ref }}
-          release_name: Release V-${{ steps.current-time.outputs.formattedTime }}
+          release_name: Release V-${{ github.ref }}
       - name: Upload release binaries
         uses: alexellis/upload-assets@0.2.2
         env:
