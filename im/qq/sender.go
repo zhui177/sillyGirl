@@ -17,6 +17,7 @@ type Sender struct {
 	matches  [][]string
 	Duration *time.Duration
 	deleted  bool
+	goon     bool
 }
 
 func (sender *Sender) GetContent() string {
@@ -30,6 +31,10 @@ func (sender *Sender) GetContent() string {
 		m := sender.Message.(*message.GroupMessage)
 		text = coolq.ToStringMessage(m.Elements, m.GroupCode, true)
 	}
+	text = strings.Replace(text, "amp;", "", -1)
+	text = strings.Replace(text, "&#91;", "[", -1)
+	text = strings.Replace(text, "&#93;", "]", -1)
+	// text = regexp.MustCompile(`&#93;`).ReplaceAllString(text, "")
 	return text
 }
 
@@ -72,19 +77,6 @@ func (sender *Sender) GetMessageID() int {
 		id = int(sender.Message.(*message.GroupMessage).Id)
 	}
 	return id
-}
-
-func (sender *Sender) GetUsername() string {
-	name := ""
-	switch sender.Message.(type) {
-	case *message.PrivateMessage:
-		name = sender.Message.(*message.PrivateMessage).Sender.Nickname
-	case *message.TempMessage:
-		name = sender.Message.(*message.TempMessage).Sender.Nickname
-	case *message.GroupMessage:
-		name = sender.Message.(*message.GroupMessage).Sender.Nickname
-	}
-	return name
 }
 
 func (sender *Sender) IsReply() bool {
@@ -151,6 +143,9 @@ func (sender *Sender) IsMedia() bool {
 }
 
 func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
+	if spy_on := qq.Get("spy_on"); spy_on != "" && strings.Contains(spy_on, fmt.Sprint(sender.GetChatID())) {
+		return 0, nil
+	}
 	msg := msgs[0]
 	for _, item := range msgs {
 		switch item.(type) {
@@ -274,4 +269,37 @@ func (sender *Sender) Disappear(lifetime ...time.Duration) {
 
 func (sender *Sender) Finish() {
 
+}
+
+func (sender *Sender) GetUsername() string {
+
+	switch sender.Message.(type) {
+	case *message.PrivateMessage:
+		m := sender.Message.(*message.PrivateMessage)
+		if m.Sender.Nickname == "" {
+			return fmt.Sprint(m.Sender.Uin)
+		}
+		return m.Sender.Nickname
+	case *message.TempMessage:
+		m := sender.Message.(*message.TempMessage)
+		if m.Sender.Nickname == "" {
+			return fmt.Sprint(m.Sender.Uin)
+		}
+		return m.Sender.Nickname
+	case *message.GroupMessage:
+		m := sender.Message.(*message.GroupMessage)
+		if m.Sender.Nickname == "" {
+			return fmt.Sprint(m.Sender.Uin)
+		}
+		return m.Sender.Nickname
+	}
+	return ""
+}
+
+func (sender *Sender) Continue() {
+	sender.goon = true
+}
+
+func (sender *Sender) IsContinue() bool {
+	return sender.goon
 }

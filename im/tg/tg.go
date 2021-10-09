@@ -2,6 +2,8 @@ package tg
 
 import (
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ type Sender struct {
 	Duration *time.Duration
 	deleted  bool
 	reply    *tb.Message
+	goon     bool
 }
 
 var tg = core.NewBucket("tg")
@@ -44,6 +47,7 @@ func init() {
 			URL:    tg.Get("url"),
 			Token:  token,
 			Poller: &tb.LongPoller{Timeout: 10 * time.Second},
+			// ParseMode: tb.ModeMarkdownV2,
 		})
 
 		if err != nil {
@@ -54,8 +58,84 @@ func init() {
 			b.Send(&tb.User{ID: i}, s)
 		}
 		core.GroupPushs["tg"] = func(i, j int, s string) {
-			b.Send(&tb.Chat{ID: int64(i)}, s)
+			paths := []string{}
+			ct := &tb.Chat{ID: int64(i)}
+			for _, v := range regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(s, -1) {
+				paths = append(paths, core.ExecPath+"/data/images/"+v[1])
+				s = strings.Replace(s, fmt.Sprintf(`[CQ:image,file=%s]`, v[1]), "", -1)
+			}
+			s = regexp.MustCompile(`\[CQ:([^\[\]]+)\]`).ReplaceAllString(s, "")
+			{
+				t := []string{}
+				for _, v := range strings.Split(s, "\n") {
+					if v != "" {
+						t = append(t, v)
+					}
+				}
+				s = strings.Join(t, "\n")
+			}
+			if len(paths) > 0 {
+				is := []tb.InputMedia{}
+				for index, path := range paths {
+					data, err := os.ReadFile(path)
+					if err == nil {
+						url := regexp.MustCompile("(https.*)").FindString(string(data))
+						if url != "" {
+							// rsp, err := httplib.Get(url).Response()
+							// if err == nil {
+							// 	i := &tb.Photo{File: tb.FromReader(rsp.Body)}
+							// 	if index == 0 {
+							// 		i.Caption = s
+							// 	}
+							// 	is = append(is, i)
+							// }
+							i := &tb.Photo{File: tb.FromURL(url)}
+
+							if index == 0 {
+								i.Caption = s
+							}
+							is = append(is, i)
+						}
+					}
+				}
+				b.SendAlbum(ct, is)
+				return
+			}
+			b.Send(ct, s)
 		}
+		b.Handle(tb.OnPhoto, func(m *tb.Message) {
+			filename := fmt.Sprint(time.Now().UnixNano()) + ".image"
+			filepath := core.ExecPath + "/data/images/" + filename
+			if b.Download(&m.Photo.File, filepath) == nil {
+				m.Text = fmt.Sprintf(`[TG:image,file=%s]`, filename) + m.Caption
+				Handler(m)
+			}
+		})
+		// b.Handle(tb.OnSticker, func(m *tb.Message) {
+		// 	buf := new(bytes.Buffer)
+		// 	buf.ReadFrom(m.Sticker.FileReader)
+		// 	img, err := webp.Decode(buf)
+		// 	if err != nil {
+
+		// 		return
+		// 	}
+		// 	buf.Reset()
+		// 	imgBuf := buf
+		// 	err = png.Encode(imgBuf, img)
+		// 	if err != nil {
+		// 		return
+		// 	}
+		// 	filename := fmt.Sprint(time.Now().UnixNano()) + ".image"
+		// 	filepath := core.ExecPath + "/data/images/" + filename
+		// 	f, err := os.Create(filepath)
+		// 	if err != nil {
+		// 		return
+		// 	}
+		// 	f.Write(imgBuf.Bytes())
+		// 	f.Close()
+		// 	m.Text = fmt.Sprintf(`[TG:image,file=%s]`, filename) + m.Caption
+		// 	Handler(m)
+		// })
 		b.Handle(tb.OnText, Handler)
 		logs.Info("监听telegram机器人")
 		b.Start()
@@ -83,7 +163,11 @@ func (sender *Sender) GetMessageID() int {
 }
 
 func (sender *Sender) GetUsername() string {
-	return sender.Message.Sender.Username
+	name := sender.Message.Sender.Username
+	if name == "" {
+		name = fmt.Sprint(sender.Message.Sender.ID)
+	}
+	return name
 }
 
 func (sender *Sender) IsReply() bool {
@@ -196,6 +280,17 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 			})
 		}
 		rt, err = b.Send(r, msg.(string), options...)
+	case core.ImagePath:
+		f, err := os.Open(string(msg.(core.ImagePath)))
+		if err != nil {
+			sender.Reply(err)
+			return 0, nil
+		} else {
+			rts, err := b.SendAlbum(r, tb.Album{&tb.Photo{File: tb.FromReader(f)}}, options...)
+			if err == nil {
+				rt = &rts[0]
+			}
+		}
 	case core.ImageUrl:
 		rsp, err := httplib.Get(string(msg.(core.ImageUrl))).Response()
 		if err != nil {
@@ -251,4 +346,12 @@ func (sender *Sender) Disappear(lifetime ...time.Duration) {
 
 func (sender *Sender) Finish() {
 
+}
+
+func (sender *Sender) Continue() {
+	sender.goon = true
+}
+
+func (sender *Sender) IsContinue() bool {
+	return sender.goon
 }

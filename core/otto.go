@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/beego/beego/v2/adapter/httplib"
 	"github.com/beego/beego/v2/adapter/logs"
@@ -15,6 +16,13 @@ import (
 type JsReply string
 
 func init() {
+	go func() {
+		time.Sleep(time.Second)
+		init123()
+	}()
+}
+
+func init123() {
 	files, err := ioutil.ReadDir(ExecPath + "/develop/replies")
 	if err != nil {
 		logs.Warn("打开文件夹%s错误，%v", ExecPath+"/develop/replies", err)
@@ -122,7 +130,7 @@ func init() {
 			data = string(v)
 		}
 		rules := []string{}
-		for _, res := range regexp.MustCompile(`\[rule:([^\[\]]+)\]`).FindAllStringSubmatch(data, -1) {
+		for _, res := range regexp.MustCompile(`\[rule:(.+)\]`).FindAllStringSubmatch(data, -1) {
 			rules = append(rules, strings.Trim(res[1], " "))
 		}
 		cron := ""
@@ -139,11 +147,30 @@ func init() {
 		}
 		var handler = func(s Sender) interface{} {
 			template := data
-			for k, v := range s.GetMatch() {
-				template = strings.Replace(template, fmt.Sprintf(`param(%d)`, k+1), fmt.Sprintf(`"%s"`, v), -1)
+			template = strings.Replace(template, "ImType()", fmt.Sprintf(`"%s"`, s.GetImType()), -1)
+			template = strings.Replace(template, "GetChatID()", fmt.Sprint(s.GetChatID()), -1)
+			param := func(call otto.Value) otto.Value {
+				i, _ := call.ToInteger()
+				v, _ := otto.ToValue(s.Get(int(i - 1)))
+				return v
 			}
 			vm := otto.New()
+			vm.Set("Delete", func() {
+				s.Delete()
+			})
+			vm.Set("Continue", func() {
+				s.Continue()
+			})
+			vm.Set("GetUsername", func() otto.Value {
+				v, _ := otto.ToValue(s.GetUsername())
+				return v
+			})
+			vm.Set("GetUserID", func() otto.Value {
+				v, _ := otto.ToValue(s.GetUserID())
+				return v
+			})
 			vm.Set("set", set)
+			vm.Set("param", param)
 			vm.Set("get", get)
 			vm.Set("request", request)
 			vm.Set("push", push)
@@ -164,7 +191,7 @@ func init() {
 			result := rt.String()
 			for _, v := range regexp.MustCompile(`\[image:\s*([^\s\[\]]+)\s*\]`).FindAllStringSubmatch(result, -1) {
 				s.Reply(ImageUrl(v[1]))
-				result = strings.Replace(result, fmt.Sprintf(`[image:%s]`, v[1]), "", -1)
+				result = strings.Replace(result, fmt.Sprintf(`[image:%s]\n`, v[1]), "", -1)
 			}
 			if result == "" {
 				return nil

@@ -25,17 +25,21 @@ type Sender interface {
 	Delete() error
 	Disappear(lifetime ...time.Duration)
 	Finish()
+	Continue()
+	IsContinue() bool
 }
 
 type Edit int
 type Replace int
 type Notify int
+type Article []string
 
 var E Edit
 var R Replace
 var N Notify
 
 type ImageUrl string
+type ImagePath string
 
 type Faker struct {
 	Message string
@@ -150,4 +154,12 @@ func (sender *Faker) Disappear(lifetime ...time.Duration) {
 
 func (sender *Faker) Finish() {
 
+}
+
+func (sender *Faker) Continue() {
+
+}
+
+func (sender *Faker) IsContinue() bool {
+	return true
 }

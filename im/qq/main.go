@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -93,7 +94,19 @@ func start() {
 
 	log.AddHook(global.NewLocalHook(w, logFormatter, global.GetLogLevel(conf.Output.LogLevel)...))
 
-	if device := qq.Get("device.json"); device == "" {
+	mkCacheDir := func(path string, _type string) {
+		if !global.PathExists(path) {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				log.Fatalf("创建%s缓存文件夹失败: %v", _type, err)
+			}
+		}
+	}
+	mkCacheDir(global.ImagePath, "图片")
+	mkCacheDir(global.VoicePath, "语音")
+	mkCacheDir(global.VideoPath, "视频")
+	mkCacheDir(global.CachePath, "发送图片")
+
+	if device := qq.Get("device.json"); device == "" || device == "{}" {
 		client.GenRandomDevice()
 		qq.Set("device.json", string(client.SystemDeviceInfo.ToJson()))
 	} else {
@@ -233,6 +246,9 @@ func start() {
 		}
 	}
 	OnGroupMessage := func(_ *client.QQClient, m *message.GroupMessage) {
+		if ignore := qq.Get("offGroups", "654346133"); strings.Contains(ignore, fmt.Sprint(m.GroupCode)) {
+			return
+		}
 		if listen := qq.Get("onGroups"); listen != "" && !strings.Contains(listen, fmt.Sprint(m.GroupCode)) {
 			return
 		}
@@ -256,9 +272,19 @@ func start() {
 		}
 	})
 	core.Pushs["qq"] = func(i int, s string) {
-		bot.SendPrivateMessage(int64(i), int64(qq.GetInt("tempMessageGroupCode")), &message.SendingMessage{Elements: []message.IMessageElement{&message.TextElement{Content: s}}})
+		bot.SendPrivateMessage(int64(i), int64(qq.GetInt("tempMessageGroupCode")), &message.SendingMessage{Elements: bot.ConvertStringMessage(s, false)})
 	}
 	core.GroupPushs["qq"] = func(i, j int, s string) {
-		bot.SendGroupMessage(int64(i), &message.SendingMessage{Elements: []message.IMessageElement{&message.TextElement{Content: s}}}) //&message.AtElement{Target: int64(j)}
+		paths := []string{}
+		for _, v := range regexp.MustCompile(`\[TG:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(s, -1) {
+			paths = append(paths, core.ExecPath+"/data/images/"+v[1])
+			s = strings.Replace(s, fmt.Sprintf(`[TG:image,file=%s]`, v[1]), "", -1)
+		}
+		imgs := []message.IMessageElement{}
+		for _, path := range paths {
+			imgs = append(imgs, &coolq.LocalImageElement{File: path})
+		}
+		//
+		bot.SendGroupMessage(int64(i), &message.SendingMessage{Elements: append(bot.ConvertStringMessage(s, true), imgs...)}) //&message.AtElement{Target: int64(j)}
 	}
 }
