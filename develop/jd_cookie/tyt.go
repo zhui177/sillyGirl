@@ -15,7 +15,7 @@ func init() {
 			Admin: true,
 			Handle: func(s core.Sender) interface{} {
 				if s.GetImType() == "tg" {
-					return "滚"
+					return nil //文明用语
 				}
 				crons, err := qinglong.GetCrons("")
 				if err != nil {
@@ -23,7 +23,7 @@ func init() {
 				}
 				for _, cron := range crons {
 					if strings.Contains(cron.Name, "推一推") {
-						if cron.Pid != nil && fmt.Sprint(cron.Pid) != "" {
+						if cron.Status == 0 { //修复错误
 							return "推一推已在运行中。"
 						}
 						err := qinglong.SetConfigEnv(qinglong.Env{
@@ -37,10 +37,10 @@ func init() {
 						if err := qinglong.Config.Req(qinglong.CRONS, qinglong.PUT, "/run", []byte(fmt.Sprintf(`["%s"]`, cron.ID))); err != nil {
 							return err
 						}
-						return "推起来啦。"
+						return "推一推起来啦。"
 					}
 				}
-				return "推不动了。"
+				return "推一推不知道为啥推不动了。"
 			},
 		},
 	})

@@ -18,6 +18,7 @@ var pin = func(class string) core.Bucket {
 }
 
 func init() {
+	//
 	core.Server.POST("/cookie", func(c *gin.Context) {
 		cookie := c.Query("ck")
 		ck := &JdCookie{
@@ -140,7 +141,7 @@ func init() {
 						continue
 					}
 					if !ck.Available() {
-						s.Reply("请先到app内设置好账号昵称。")
+						s.Reply("请先到app内设置好账号昵称。") //有瞎编ck的嫌疑
 						continue
 					}
 					if ck.Nickname == "" {
