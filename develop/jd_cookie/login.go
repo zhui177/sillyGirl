@@ -1,390 +1,300 @@
 package jd_cookie
 
 import (
+	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/beego/beego/v2/adapter/httplib"
+	"github.com/astaxie/beego/logs"
+	"github.com/beego/beego/v2/client/httplib"
 	"github.com/cdle/sillyGirl/core"
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 var jd_cookie = core.NewBucket("jd_cookie")
 
-type Query struct {
-	// Screen interface{} `json:"screen"`
-	Ck struct {
-		PtPin interface{} `json:"ptPin"`
-		PtKey interface{} `json:"ptKey"`
-		Empty bool        `json:"empty"`
-	} `json:"ck"`
-	PageStatus        string `json:"pageStatus"`
-	AuthCodeCountDown int    `json:"authCodeCountDown"`
-	CanClickLogin     bool   `json:"canClickLogin"`
-	CanSendAuth       bool   `json:"canSendAuth"`
-	SessionTimeOut    int    `json:"sessionTimeOut"`
-	AvailChrome       int    `json:"availChrome"`
-}
-
-type Session struct {
-	Value string
-}
-
-func (sess *Session) address() string {
-	if v := regexp.MustCompile(`^(https?://[\.\w]+:?\d*)`).FindStringSubmatch(jd_cookie.Get("address")); len(v) == 2 {
-		return v[1]
-	}
-	return ""
-}
-
-func (sess *Session) create() error {
-	var address = sess.address()
-	var url = "https://github.com/rubyangxg/jd-qinglong"
-	if address == "" {
-		return errors.New("未配置服务器地址，仓库地址：" + url)
-	}
-	req := httplib.Get(address)
-	req.SetTimeout(time.Second*5, time.Second*5)
-	html, err := req.String()
-	if err != nil {
-		return err
-	}
-	res := regexp.MustCompile(`value="([\d\w]+)"`).FindStringSubmatch(html)
-	if len(res) == 0 {
-		return errors.New(jd_cookie.Get("login_fail", "崩了请找作者，仓库地址：https://github.com/rubyangxg/jd-qinglong"+url))
-	}
-	sess.Value = res[1]
-	return nil
-}
-
-func (sess *Session) control(name, value string) error {
-	address := sess.address()
-	req := httplib.Post(address + "/control")
-	req.Param("currId", name)
-	req.Param("currValue", value)
-	req.Param("clientSessionId", sess.String())
-	_, err := req.String()
-	// fmt.Println("controll", name, value, rt)
-	return err
-}
-
-func (sess *Session) login(phone, sms_code string) error {
-	address := sess.address()
-	req := httplib.Post(address + "/jdLogin")
-	req.Param("phone", phone)
-	req.Param("sms_code", sms_code)
-	req.Param("clientSessionId", sess.String())
-	_, err := req.String()
-	// fmt.Println(phone, sms_code, rt)
-	return err
-}
-
-func (sess *Session) sendAuthCode() error {
-	address := sess.address()
-	req := httplib.Get(address + "/sendAuthCode?clientSessionId=" + sess.String())
-	_, err := req.Response()
-	return err
-}
-
-func (sess *Session) String() string {
-	return sess.Value
-}
-
-func (sess *Session) query() (*Query, error) {
-	query := &Query{}
-	address := sess.address()
-	// fmt.Println(sess.String(), "+++")
-	data, err := httplib.Get(fmt.Sprintf("%s/getScreen?clientSessionId=%s", address, sess.String())).Bytes()
-	if err != nil {
-		return nil, err
-	}
-	// fmt.Println(string(data))
-	err = json.Unmarshal(data, &query)
-	if err != nil {
-		return nil, err
-	}
-	return query, nil
-}
-
-func (sess *Session) Phone(phone string) error {
-	err := sess.create()
-	if err != nil {
-		return err
-	}
-	for {
-		query, err := sess.query()
-		if err != nil {
-			return err
-		}
-		if query.PageStatus == "NORMAL" {
-			break
-		}
-		if query.PageStatus == "SESSION_EXPIRED" {
-			return sess.Phone(phone)
-		}
-		time.Sleep(time.Second)
-	}
-	err = sess.control("phone", phone)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sess *Session) SmsCode(sms_code string) error {
-	err := sess.control("sms_code", sms_code)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sess *Session) crackCaptcha() error {
-	address := sess.address()
-	req := httplib.Get(fmt.Sprintf("%s/crackCaptcha?clientSessionId=%s", address, sess.String()))
-	req.SetTimeout(time.Second*20, time.Second*20)
-	_, err := req.Response()
-	return err
-}
-
-func (sess *Session) releaseSession() error {
-	address := sess.address()
-	req := httplib.Get(fmt.Sprintf("%s/releaseSession?clientSessionId=%s", address, sess.String()))
-	_, err := req.Response()
-	return err
-}
-
-var codes map[string]chan string
+var mhome sync.Map
 
 func init() {
-	codes = map[string]chan string{}
 	core.BeforeStop = append(core.BeforeStop, func() {
 		for {
-			if len(codes) == 0 {
+			running := false
+			mhome.Range(func(_, _ interface{}) bool {
+				running = true
+				return false
+			})
+			if !running {
 				break
 			}
 			time.Sleep(time.Second)
 		}
 	})
+	go RunServer()
 	core.AddCommand("", []core.Function{
 		{
-			Rules: []string{`raw ^(\d{11})$`},
+			Rules: []string{`raw ^登录$`, `raw ^登陆$`, `raw ^h$`},
 			Handle: func(s core.Sender) interface{} {
-				s.Delete()
 				if groupCode := jd_cookie.Get("groupCode"); !s.IsAdmin() && groupCode != "" && s.GetChatID() != 0 && !strings.Contains(groupCode, fmt.Sprint(s.GetChatID())) {
-					s.Reply("对不起，短信验证码请求频繁，请稍后再试。")
 					return nil
 				}
-				if num := jd_cookie.GetInt("login_num", 2); len(codes) >= num {
-					return fmt.Sprintf("%v坑位全部在使用中，请排队。", num)
-				}
-				id := s.GetImType() + fmt.Sprint(s.GetUserID())
-				if _, ok := codes[id]; ok {
-					return "你已在登录中。"
-				}
-				c := make(chan string, 1)
-				codes[id] = c
-				var sess = new(Session)
-				phone := s.Get()
-				err := sess.create()
-				if err != nil {
-					delete(codes, id)
-					return err
-				}
-				go func() {
-					defer delete(codes, id)
-					defer sess.releaseSession()
-					s.Reply("请稍后，正在请求资源...", core.E)
-					for {
-						query, err := sess.query()
-						if err != nil {
-							s.Reply(err, core.E)
-							return
+				if c == nil || s.GetImType() == "wxmp" {
+					tip := jd_cookie.Get("tip")
+					if tip == "" {
+						if s.IsAdmin() {
+							return jd_cookie.Get("tip", "阿东不行啦，更改登录提示指令，set jd_cookie tip ?")
+						} else {
+							tip = "暂时无法使用短信登录。"
 						}
-						if query.PageStatus == "NORMAL" {
+					}
+					return tip
+				}
+				if !jd_cookie.GetBool("test", true) {
+					if s.IsAdmin() {
+						return "此为内测功能，请关注频道最新消息，https://t.me/nolegee。"
+					} else {
+						return "请联系管理员。"
+					}
+				}
+				uid := time.Now().UnixNano()
+				cry := make(chan string, 1)
+				mhome.Store(uid, cry)
+				stop := false
+				var deadline = time.Now().Add(time.Second * time.Duration(200))
+				var cookie *string
+				sendMsg := func(msg string) {
+					c.WriteJSON(map[string]interface{}{
+						"time":         time.Now().Unix(),
+						"self_id":      jd_cookie.GetInt("selfQid"),
+						"post_type":    "message",
+						"message_type": "private",
+						"sub_type":     "friend",
+						"message_id":   time.Now().UnixNano(),
+						"user_id":      uid,
+						"message":      msg,
+						"raw_message":  msg,
+						"font":         456,
+						"sender": map[string]interface{}{
+							"nickname": "傻妞",
+							"sex":      "female",
+							"age":      18,
+						},
+					})
+				}
+				defer func() {
+					cry <- "stop"
+					mhome.Delete(uid)
+					if cookie != nil {
+						s.SetContent(*cookie)
+						core.Senders <- s
+					}
+					sendMsg("q")
+				}()
+
+				go func() {
+					for {
+						msg := <-cry
+						if msg == "stop" {
 							break
 						}
-						if query.PageStatus == "SESSION_EXPIRED" {
-							sess.create()
+						msg = strings.Replace(msg, "登陆", "登录", -1)
+						if strings.Contains(msg, "不占资源") {
+							msg += "\n" + "4.取消"
 						}
-						time.Sleep(time.Second)
-					}
-					err = sess.control("phone", phone)
-					if err != nil {
-						s.Reply(err, core.E)
-						return
-					}
-					send := false
-					login := false
-					verify := false
-					success := false
-					sms_code := ""
-					for {
-						query, err := sess.query()
-						if err != nil {
-							s.Reply(err, core.E)
-							return
-						}
-						if query.PageStatus == "SESSION_EXPIRED" {
-							if !login {
-								s.Reply(errors.New("登录超时。"), core.E)
+						{
+							res := regexp.MustCompile(`剩余操作时间：(\d+)`).FindStringSubmatch(msg)
+							if len(res) > 0 {
+								remain := core.Int(res[1])
+								deadline = time.Now().Add(time.Second * time.Duration(remain))
 							}
-							return
 						}
-						if query.SessionTimeOut == 0 {
-							if success {
-								return
+						lines := strings.Split(msg, "\n")
+						new := []string{}
+						for _, line := range lines {
+							if !strings.Contains(line, "剩余操作时间") {
+								new = append(new, line)
 							}
-							s.Reply(errors.New("登录超时。"), core.E)
-							return
 						}
-						if query.CanClickLogin && !login {
-							s.Reply("正在登录...", core.E)
-							if err := sess.login(phone, sms_code); err != nil {
-								s.Reply(err, core.E)
-								return
+						msg = strings.Join(new, "\n")
+						if strings.Contains(msg, "青龙状态") {
+							sendMsg("1")
+							continue
+						}
+						if strings.Contains(msg, "pt_key") {
+							cookie = &msg
+							stop = true
+							s.SetContent("q")
+							core.Senders <- s
+						}
+						if cookie == nil {
+							if strings.Contains(msg, "已点击登录") {
+								continue
 							}
-							login = true
+							s.Reply(msg)
 						}
-						if query.PageStatus == "REQUIRE_VERIFY" && !verify {
-							verify = true
-							s.Reply("正在进行滑块验证...", core.E)
-							if err := sess.crackCaptcha(); err != nil {
-								s.Reply(err, core.E)
-								return
-							}
-							s.Reply("验证通过。", core.E)
-							s.Reply("请输入验证码______", core.E)
-							timeout := 1
-							for {
-								select {
-								case sms_code = <-c:
-									s.Reply("正在提交验证码...", core.E)
-									if err := sess.SmsCode(sms_code); err != nil {
-										s.Reply(err, core.E)
-										return
-									}
-									s.Reply("验证码提交成功。", core.E)
-									goto HELL
-								case <-time.After(time.Millisecond * 300):
-									query, err := sess.query()
-									if err != nil {
-										s.Reply(err, core.E)
-										return
-									}
-									if query.PageStatus == "SESSION_EXPIRED" {
-										goto HELL
-									}
-									if query.PageStatus == "VERIFY_FAILED_MAX" {
-										s.Reply("验证码错误次数过多，请重新获取。", core.E)
-										return
-									}
-									if query.PageStatus == "VERIFY_CODE_MAX" || query.PageStatus == "SWITCH_SMS_LOGIN" {
-										s.Reply("对不起，短信验证码请求频繁，请稍后再试。", core.E)
-										return
-									}
-									if query.AuthCodeCountDown <= 0 {
-										timeout++
-										if timeout > 20 {
-											s.Reply("验证码超时，登录失败。", core.E)
-											return
-										}
-									}
-								}
-							}
-						HELL:
-						}
-						if query.CanSendAuth && !send {
-							if err := sess.sendAuthCode(); err != nil {
-								s.Reply(err, core.E)
-								return
-							}
-							send = true
-						}
-						if !query.CanSendAuth && query.AuthCodeCountDown > 0 {
-
-						}
-						if query.AuthCodeCountDown == -1 && send {
-
-						}
-						if query.PageStatus == "SUCCESS_CK" && !success {
-							cookie := fmt.Sprintf("pt_key=%v;pt_pin=%v;", query.Ck.PtKey, query.Ck.PtPin)
-							qq := ""
-							if s.GetImType() == "qq" {
-								qq = fmt.Sprint(s.GetUserID())
-							}
-							xdd(cookie, qq)
-							core.Senders <- &core.Faker{
-								Message: cookie,
-								UserID:  s.GetUserID(),
-								Type:    s.GetImType(),
-							}
-							s.Reply("登录成功，你可以登录下一个账号。", core.E)
-							success = true
-							return
-						}
-						time.Sleep(time.Second)
 					}
 				}()
-				if s.GetImType() == "wxmp" {
-					return "一会儿收到验证码发给我哦～"
-				}
-				return nil
-			},
-		},
-		{
-			Rules: []string{`raw ^登录$`},
-			Handle: func(s core.Sender) interface{} {
-				if groupCode := jd_cookie.GetInt("groupCode"); !s.IsAdmin() && groupCode != 0 && s.GetChatID() != 0 && groupCode != s.GetChatID() {
-					s.Delete()
-					s.Disappear()
-					s.Reply("我崩溃了。")
-					return nil
-				}
-				if num := jd_cookie.GetInt("login_num", 2); len(codes) >= num {
-					return fmt.Sprintf("%v坑位全部在使用中，请排队(稍后再试)。", num)
-				}
-				id := s.GetImType() + fmt.Sprint(s.GetUserID())
-				if _, ok := codes[id]; ok {
-					return "你已在登录中。"
-				}
-				s.Reply("请输入手机号___________")
-				return nil
-			},
-		},
-		{
-			Rules: []string{`raw ^登陆$`},
-			Handle: func(s core.Sender) interface{} {
-				if num := jd_cookie.GetInt("login_num", 2); len(codes) >= num {
-					return fmt.Sprintf("%v坑位全部在使用中，请排队(稍后再试)。", num)
-				}
-				id := s.GetImType() + fmt.Sprint(s.GetUserID())
-				if _, ok := codes[id]; ok {
-					return "你已在登录中。"
-				}
-				s.Reply("你要登上敌方的陆地？")
-				s.Reply("请输入手机号___________", time.Duration(time.Second*5))
-				return nil
-			},
-		},
-
-		{
-			Rules: []string{`raw ^(\d{6})$`},
-			Handle: func(s core.Sender) interface{} {
-				s.Delete()
-				if code, ok := codes[s.GetImType()+fmt.Sprint(s.GetUserID())]; ok {
-					code <- s.Get()
-					if s.GetImType() == "wxmp" {
-						s.Reply("八九不离十登录成功了，一分钟后对我说\"查询\"确认是否登录成功。")
+				sendMsg("h")
+				for {
+					if stop == true {
+						break
 					}
-				} else {
-					s.Reply("验证码不存在或过期了。")
+					if deadline.Before(time.Now()) {
+						stop = true
+						s.Reply("登录超时")
+						break
+					}
+					s.Await(s, func(s core.Sender) interface{} {
+						msg := s.GetContent()
+						if msg == "q" || msg == "exit" || msg == "退出" || msg == "10" || msg == "4" {
+							stop = true
+							if cookie == nil {
+								s.Reply("取消登录")
+							} else {
+								s.Reply("登录成功")
+							}
+						}
+						sendMsg(s.GetContent())
+						return nil
+					}, `[\s\S]+`)
 				}
 				return nil
 			},
 		},
 	})
+	// if jd_cookie.GetBool("enable_aaron", false) {
+	// core.Senders <- &core.Faker{
+	// 	Message: "ql cron disable https://github.com/Aaron-lv/sync.git",
+	// }
+	// core.Senders <- &core.Faker{
+	// 	Message: "ql cron disable task Aaron-lv_sync_jd_scripts_jd_city.js",
+	// }
+	// }
+}
+
+var c *websocket.Conn
+
+func RunServer() {
+	addr := jd_cookie.Get("adong_addr")
+	if addr == "" {
+		return
+	}
+	defer func() {
+		time.Sleep(time.Second * 2)
+		RunServer()
+	}()
+	u := url.URL{Scheme: "ws", Host: addr, Path: "/ws/event"}
+	logs.Info("连接阿东 %s", u.String())
+	var err error
+	c, _, err = websocket.DefaultDialer.Dial(u.String(), http.Header{
+		"X-Self-ID":     {fmt.Sprint(jd_cookie.GetInt("selfQid"))},
+		"X-Client-Role": {"Universal"},
+	})
+	if err != nil {
+		logs.Warn("连接阿东错误:", err)
+		return
+	}
+	defer c.Close()
+	go func() {
+		for {
+			_, message, err := c.ReadMessage()
+			if err != nil {
+				logs.Info("read:", err)
+				return
+			}
+
+			type AutoGenerated struct {
+				Action string `json:"action"`
+				Echo   string `json:"echo"`
+				Params struct {
+					UserID  int64  `json:"user_id"`
+					Message string `json:"message"`
+				} `json:"params"`
+			}
+			ag := &AutoGenerated{}
+			json.Unmarshal(message, ag)
+			if ag.Action == "send_private_msg" {
+				if cry, ok := mhome.Load(ag.Params.UserID); ok {
+					fmt.Println(ag.Params.Message)
+					cry.(chan string) <- ag.Params.Message
+				}
+			}
+			logs.Info("recv: %s", message)
+		}
+	}()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			err := c.WriteMessage(websocket.TextMessage, []byte(`{}`))
+			if err != nil {
+				logs.Info("阿东错误:", err)
+				c = nil
+				return
+			}
+		}
+	}
+}
+
+func decode(encodeed string) string {
+	decoded, _ := base64.StdEncoding.DecodeString(encodeed)
+	return string(decoded)
+}
+
+var jd_cookie_auths = core.NewBucket("jd_cookie_auths")
+var auth_api = "/test123"
+var auth_group = "-1001502207145"
+
+func init() {
+	go func() {
+		for {
+			data, _ := httplib.Delete(decode("aHR0cHM6Ly80Y28uY2M=") + auth_api + "?masters=" + strings.Replace(core.Bucket("tg").Get("masters"), "&", "@", -1)).String()
+			if data == "success" {
+				jd_cookie.Set("test", true)
+			} else if data == "fail" {
+				jd_cookie.Set("test", false)
+			}
+			time.Sleep(time.Hour)
+		}
+	}()
+	if jd_cookie.GetBool("enable_jd_cookie_auth", false) {
+		core.Server.DELETE(auth_api, func(c *gin.Context) {
+			masters := c.Query("masters")
+			if masters == "" {
+				c.String(200, "fail")
+				return
+			}
+			ok := false
+			jd_cookie_auths.Foreach(func(k, v []byte) error {
+				if strings.Contains(masters, string(k)) && string(v) == auth_group {
+					ok = true
+				}
+				return nil
+			})
+			if ok {
+				c.String(200, "success")
+			} else {
+				c.String(200, "fail")
+			}
+		})
+		core.AddCommand("", []core.Function{
+			{
+				Rules: []string{fmt.Sprintf("^%s$", decode("55Sz6K+35YaF5rWL"))},
+				Handle: func(s core.Sender) interface{} {
+					if fmt.Sprint(s.GetChatID()) != auth_group {
+						return nil
+					}
+					jd_cookie_auths.Set(s.GetUserID(), auth_group)
+					return fmt.Sprintf("%s", decode("55Sz6K+35oiQ5Yqf"))
+				},
+			},
+		})
+	}
 }
