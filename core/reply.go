@@ -5,12 +5,15 @@ import (
 	"io/ioutil"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/beego/beego/v2/adapter/httplib"
 	"github.com/buger/jsonparser"
 )
+
+var reply = NewBucket("reply")
 
 type Reply struct {
 	Rules   []string
@@ -114,6 +117,12 @@ func InitReplies() {
 						s.Reply(ImageUrl(res[1]))
 					}
 					return nil
+				}
+				timeUnix := strconv.FormatInt(time.Now().Unix(), 10)
+				if strings.Contains(Url, "?") {
+					Url = Url + "&_=" + timeUnix
+				} else {
+					Url = Url + "?_=" + timeUnix
 				}
 				s.Reply(ImageUrl(Url))
 			case "json":

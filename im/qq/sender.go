@@ -17,10 +17,13 @@ type Sender struct {
 	matches  [][]string
 	Duration *time.Duration
 	deleted  bool
-	goon     bool
+	core.BaseSender
 }
 
 func (sender *Sender) GetContent() string {
+	if sender.Content != "" {
+		return sender.Content
+	}
 	text := ""
 	switch sender.Message.(type) {
 	case *message.PrivateMessage:
@@ -34,11 +37,12 @@ func (sender *Sender) GetContent() string {
 	text = strings.Replace(text, "amp;", "", -1)
 	text = strings.Replace(text, "&#91;", "[", -1)
 	text = strings.Replace(text, "&#93;", "]", -1)
+	// sender.Reply(text)
 	// text = regexp.MustCompile(`&#93;`).ReplaceAllString(text, "")
-	return text
+	return strings.Trim(text, " ")
 }
 
-func (sender *Sender) GetUserID() int {
+func (sender *Sender) GetUserID() interface{} {
 	id := 0
 	switch sender.Message.(type) {
 	case *message.PrivateMessage:
@@ -51,7 +55,7 @@ func (sender *Sender) GetUserID() int {
 	return id
 }
 
-func (sender *Sender) GetChatID() int {
+func (sender *Sender) GetChatID() interface{} {
 	id := 0
 	switch sender.Message.(type) {
 	case *message.GroupMessage:
@@ -89,35 +93,6 @@ func (sender *Sender) GetReplySenderUserID() int {
 
 func (sender *Sender) GetRawMessage() interface{} {
 	return sender.Message
-}
-
-func (sender *Sender) SetMatch(ss []string) {
-	sender.matches = [][]string{ss}
-}
-func (sender *Sender) SetAllMatch(ss [][]string) {
-	sender.matches = ss
-}
-
-func (sender *Sender) GetMatch() []string {
-	return sender.matches[0]
-}
-
-func (sender *Sender) GetAllMatch() [][]string {
-	return sender.matches
-}
-
-func (sender *Sender) Get(index ...int) string {
-	i := 0
-	if len(index) != 0 {
-		i = index[0]
-	}
-	if len(sender.matches) == 0 {
-		return ""
-	}
-	if len(sender.matches[0]) < i+1 {
-		return ""
-	}
-	return sender.matches[0][i]
 }
 
 func (sender *Sender) IsAdmin() bool {
@@ -175,7 +150,7 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 			}
 		}
 		if content != "" {
-			bot.SendPrivateMessage(m.Sender.Uin, 0, &message.SendingMessage{Elements: []message.IMessageElement{&message.TextElement{Content: content}}})
+			bot.SendPrivateMessage(m.Sender.Uin, 0, &message.SendingMessage{Elements: bot.ConvertStringMessage(content, false)})
 		}
 	case *message.TempMessage:
 		m := sender.Message.(*message.TempMessage)
@@ -197,7 +172,7 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 			}
 		}
 		if content != "" {
-			bot.SendPrivateMessage(m.Sender.Uin, m.GroupCode, &message.SendingMessage{Elements: []message.IMessageElement{&message.TextElement{Content: content}}})
+			bot.SendPrivateMessage(m.Sender.Uin, m.GroupCode, &message.SendingMessage{Elements: bot.ConvertStringMessage(content, false)})
 		}
 	case *message.GroupMessage:
 		var id int32
@@ -223,7 +198,8 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 			if strings.Contains(content, "\n") {
 				content = "\n" + content
 			}
-			id = bot.SendGroupMessage(m.GroupCode, &message.SendingMessage{Elements: []message.IMessageElement{&message.AtElement{Target: m.Sender.Uin}, &message.TextElement{Content: content}}})
+			id = bot.SendGroupMessage(m.GroupCode, &message.SendingMessage{Elements: append([]message.IMessageElement{
+				&message.AtElement{Target: m.Sender.Uin}}, bot.ConvertStringMessage(content, true)...)}) //
 		}
 		if id > 0 && sender.Duration != nil {
 			if *sender.Duration != 0 {
@@ -294,12 +270,4 @@ func (sender *Sender) GetUsername() string {
 		return m.Sender.Nickname
 	}
 	return ""
-}
-
-func (sender *Sender) Continue() {
-	sender.goon = true
-}
-
-func (sender *Sender) IsContinue() bool {
-	return sender.goon
 }

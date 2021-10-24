@@ -13,8 +13,9 @@ import (
 	"github.com/Mrs4s/go-cqhttp/coolq"
 	"github.com/Mrs4s/go-cqhttp/global"
 	"github.com/Mrs4s/go-cqhttp/global/config"
+	"github.com/beego/beego/v2/core/logs"
 	"github.com/cdle/sillyGirl/core"
-	yaml "gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v3"
 
 	"github.com/Mrs4s/MiraiGo/binary"
 	"github.com/Mrs4s/MiraiGo/client"
@@ -50,6 +51,7 @@ func start() {
 	conf.Account.Password = qq.Get("password")
 	conf.Message.ReportSelfMessage = true
 	conf.Account.ReLogin.MaxTimes = 30
+	// conf.Output.Debug = true
 	conf.Database = map[string]yaml.Node{
 		"leveldb": {
 			Kind: 4,
@@ -246,10 +248,11 @@ func start() {
 		}
 	}
 	OnGroupMessage := func(_ *client.QQClient, m *message.GroupMessage) {
-		if ignore := qq.Get("offGroups", "654346133"); strings.Contains(ignore, fmt.Sprint(m.GroupCode)) {
+		if ignore := qq.Get("offGroups", "654346133&923993867"); len(ignore) > 4 && strings.Contains(ignore, fmt.Sprint(m.GroupCode)) {
+			logs.Warn("ignore")
 			return
 		}
-		if listen := qq.Get("onGroups"); listen != "" && !strings.Contains(listen, fmt.Sprint(m.GroupCode)) {
+		if listen := qq.Get("onGroups"); len(listen) > 4 && !strings.Contains(listen, fmt.Sprint(m.GroupCode)) {
 			return
 		}
 		core.Senders <- &Sender{
@@ -259,11 +262,16 @@ func start() {
 	bot.Client.OnPrivateMessage(onPrivateMessage)
 	bot.Client.OnGroupMessage(OnGroupMessage)
 	bot.Client.OnTempMessage(onTempMessage)
-	if qq.GetBool("onself", true) == true {
-		bot.Client.OnSelfPrivateMessage(onPrivateMessage)
-		bot.Client.OnSelfGroupMessage(OnGroupMessage)
-	}
-
+	bot.Client.OnSelfPrivateMessage(func(q *client.QQClient, pm *message.PrivateMessage) {
+		if qq.GetBool("onself", true) == true {
+			onPrivateMessage(q, pm)
+		}
+	})
+	bot.Client.OnSelfGroupMessage(func(q *client.QQClient, gm *message.GroupMessage) {
+		if qq.GetBool("onself", true) == true {
+			OnGroupMessage(q, gm)
+		}
+	})
 	bot.Client.OnNewFriendRequest(func(_ *client.QQClient, request *client.NewFriendRequest) {
 		if qq.GetBool("auto_friend", false) == true {
 			time.Sleep(time.Second)
@@ -271,13 +279,13 @@ func start() {
 			core.NotifyMasters(fmt.Sprintf("QQ已同意%v的好友申请，验证信息为：%v", request.RequesterUin, request.Message))
 		}
 	})
-	core.Pushs["qq"] = func(i int, s string) {
-		bot.SendPrivateMessage(int64(i), int64(qq.GetInt("tempMessageGroupCode")), &message.SendingMessage{Elements: bot.ConvertStringMessage(s, false)})
+	core.Pushs["qq"] = func(i interface{}, s string) {
+		bot.SendPrivateMessage(core.Int64(i), int64(qq.GetInt("tempMessageGroupCode")), &message.SendingMessage{Elements: bot.ConvertStringMessage(s, false)})
 	}
-	core.GroupPushs["qq"] = func(i, j int, s string) {
+	core.GroupPushs["qq"] = func(i, _ interface{}, s string) {
 		paths := []string{}
 		for _, v := range regexp.MustCompile(`\[TG:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(s, -1) {
-			paths = append(paths, core.ExecPath+"/data/images/"+v[1])
+			paths = append(paths, "data/images/"+v[1])
 			s = strings.Replace(s, fmt.Sprintf(`[TG:image,file=%s]`, v[1]), "", -1)
 		}
 		imgs := []message.IMessageElement{}
@@ -285,6 +293,6 @@ func start() {
 			imgs = append(imgs, &coolq.LocalImageElement{File: path})
 		}
 		//
-		bot.SendGroupMessage(int64(i), &message.SendingMessage{Elements: append(bot.ConvertStringMessage(s, true), imgs...)}) //&message.AtElement{Target: int64(j)}
+		bot.SendGroupMessage(core.Int64(i), &message.SendingMessage{Elements: append(bot.ConvertStringMessage(s, true), imgs...)}) //&message.AtElement{Target: int64(j)}
 	}
 }

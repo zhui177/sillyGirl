@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"runtime"
 	"strconv"
 
 	"github.com/boltdb/bolt"
@@ -23,11 +24,12 @@ func NewBucket(name string) Bucket {
 }
 
 func initStore() {
-	// if _, err := os.Stat(ExecPath + "/sillyGirl.cache"); err == nil {
-	// 	os.Rename(ExecPath+"/sillyGirl.cache", "/etc/sillyGirl/sillyGirl.cache")
-	// }
 	var err error
-	db, err = bolt.Open("/etc/sillyGirl/sillyGirl.cache", 0600, nil)
+	if runtime.GOOS != "windows" {
+		db, err = bolt.Open("/etc/sillyGirl/sillyGirl.cache", 0600, nil)
+	} else {
+		db, err = bolt.Open(`C:\ProgramData\sillyGirl.cache`, 0600, nil)
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -116,9 +118,14 @@ func (bucket Bucket) Foreach(f func(k, v []byte) error) {
 	})
 }
 
-var Int = func(s string) int {
-	i, _ := strconv.Atoi(s)
+var Int = func(s interface{}) int {
+	i, _ := strconv.Atoi(fmt.Sprint(s))
 	return i
+}
+
+var Int64 = func(s interface{}) int64 {
+	i, _ := strconv.Atoi(fmt.Sprint(s))
+	return int64(i)
 }
 
 func (bucket Bucket) Create(i interface{}) error {

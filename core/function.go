@@ -1,17 +1,24 @@
 package core
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
+	"time"
 
-	"github.com/beego/beego/v2/adapter/logs"
+	"github.com/beego/beego/v2/core/logs"
 	cron "github.com/robfig/cron/v3"
 )
 
 var c *cron.Cron
 
 func init() {
+	if runtime.GOOS != "windows" {
+		pname = regexp.MustCompile(`/([^/\s]+)$`).FindStringSubmatch(os.Args[0])[1]
+	}
 	c = cron.New()
 	c.Start()
 }
@@ -24,7 +31,7 @@ type Function struct {
 	Cron    string
 }
 
-var pname = regexp.MustCompile(`/([^/\s]+)$`).FindStringSubmatch(os.Args[0])[1]
+var pname = ""
 
 var name = func() string {
 	return sillyGirl.Get("name", "傻妞")
@@ -50,13 +57,13 @@ func AddCommand(prefix string, cmds []Function) {
 				cmds[j].Rules[i] = strings.Replace(cmds[j].Rules[i], "raw ", "", -1)
 				continue
 			}
+			cmds[j].Rules[i] = strings.ReplaceAll(cmds[j].Rules[i], `\r\a\w`, "raw")
 			if strings.Contains(cmds[j].Rules[i], "$") {
 				continue
 			}
 			if prefix != "" {
 				cmds[j].Rules[i] = prefix + `\s+` + cmds[j].Rules[i]
 			}
-
 			cmds[j].Rules[i] = strings.Replace(cmds[j].Rules[i], "(", `[(]`, -1)
 			cmds[j].Rules[i] = strings.Replace(cmds[j].Rules[i], ")", `[)]`, -1)
 			cmds[j].Rules[i] = regexp.MustCompile(`\?$`).ReplaceAllString(cmds[j].Rules[i], `(.+)`)
@@ -70,9 +77,9 @@ func AddCommand(prefix string, cmds []Function) {
 			if _, err := c.AddFunc(cmds[j].Cron, func() {
 				cmd.Handle(&Faker{})
 			}); err != nil {
-				logs.Warn("任务%v添加失败%v", cmds[j].Rules[0], err)
+				// logs.Warn("任务%v添加失败%v", cmds[j].Rules[0], err)
 			} else {
-				logs.Warn("任务%v添加成功", cmds[j].Rules[0])
+				// logs.Warn("任务%v添加成功", cmds[j].Rules[0])
 			}
 		}
 	}
@@ -80,6 +87,71 @@ func AddCommand(prefix string, cmds []Function) {
 
 func handleMessage(sender Sender) {
 	defer sender.Finish()
+	recall := sillyGirl.Get("recall")
+	if recall != "" {
+		recalled := false
+		for _, v := range strings.Split(recall, "&") {
+			reg, err := regexp.Compile(v)
+			if err == nil {
+				if reg.FindString(sender.GetContent()) != "" {
+					if !sender.IsAdmin() && sender.GetImType() != "wx" {
+						sender.Delete()
+						sender.Reply("本妞清除了不好的消息～", time.Duration(time.Second))
+						recalled = true
+						break
+					}
+				}
+			}
+		}
+		if recalled == true {
+			return
+		}
+	}
+
+	defer func() {
+		logs.Info("%v ==> %v", sender.GetContent(), "finished")
+	}()
+	u, g, i := fmt.Sprint(sender.GetUserID()), fmt.Sprint(sender.GetChatID()), fmt.Sprint(sender.GetImType())
+	con := true
+	mtd := false
+	waits.Range(func(k, v interface{}) bool {
+		c := v.(*Carry)
+		vs, _ := url.ParseQuery(k.(string))
+		userID := vs.Get("u")
+		chatID := vs.Get("c")
+		imType := vs.Get("i")
+		forGroup := vs.Get("f")
+		if imType != i {
+			return true
+		}
+		if chatID != g {
+			return true
+		}
+		if userID != u && forGroup == "" {
+			return true
+		}
+		if m := regexp.MustCompile(c.Pattern).FindString(sender.GetContent()); m != "" {
+			mtd = true
+			c.Chan <- sender
+			sender.Reply(<-c.Result)
+			if !sender.IsContinue() {
+				con = false
+				return false
+			}
+		}
+		return true
+	})
+	if mtd && !con {
+		return
+	}
+	// if v, ok := waits.Load(key); ok {
+	// 	c := v.(*Carry)
+	// 	if m := regexp.MustCompile(c.Pattern).FindString(sender.GetContent()); m != "" {
+	// 		c.Chan <- sender
+	// 		sender.Reply(<-c.Result)
+	// 		return
+	// 	}
+	// }
 	for _, function := range functions {
 		for _, rule := range function.Rules {
 			var matched bool
@@ -99,11 +171,13 @@ func handleMessage(sender Sender) {
 				}
 			}
 			if matched {
+				logs.Info("%v ==> %v", sender.GetContent(), rule)
 				if function.Admin && !sender.IsAdmin() {
 					sender.Delete()
 					sender.Disappear()
-					sender.Reply("没有权限操作")
-					sender.Finish()
+					// if sender.GetImType() != "wx" && sender.GetImType() != "qq" {
+					sender.Reply("再捣乱我就报警啦～")
+					// }
 					return
 				}
 				rt := function.Handle(sender)
@@ -118,6 +192,19 @@ func handleMessage(sender Sender) {
 		}
 	goon:
 	}
+	reply.Foreach(func(k, v []byte) error {
+		if string(v) == "" {
+			return nil
+		}
+		reg, err := regexp.Compile(string(k))
+		if err == nil {
+			if reg.FindString(sender.GetContent()) != "" {
+				sender.Reply(string(v))
+			}
+		}
+		return nil
+	})
+
 }
 
 func FetchCookieValue(ps ...string) string {

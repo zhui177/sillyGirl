@@ -1,7 +1,11 @@
 package tg
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -15,11 +19,10 @@ import (
 
 type Sender struct {
 	Message  *tb.Message
-	matches  [][]string
 	Duration *time.Duration
 	deleted  bool
 	reply    *tb.Message
-	goon     bool
+	core.BaseSender
 }
 
 var tg = core.NewBucket("tg")
@@ -35,6 +38,22 @@ var Handler = func(message *tb.Message) {
 	}
 }
 
+func buildClientWithProxy(addr string) (*http.Client, error) {
+	if addr != "" {
+		u, err := url.Parse(addr)
+		if err != nil {
+			panic(err)
+		}
+		// Patch client transport
+		httpTransport := &http.Transport{Proxy: http.ProxyURL(u)}
+		hc := &http.Client{Transport: httpTransport}
+
+		return hc, nil
+	}
+
+	return nil, nil // use default
+}
+
 func init() {
 	go func() {
 		token := tg.Get("token")
@@ -42,26 +61,36 @@ func init() {
 			logs.Warn("未提供telegram机器人token")
 			return
 		}
-		var err error
-		b, err = tb.NewBot(tb.Settings{
-			URL:    tg.Get("url"),
+
+		settings := tb.Settings{
 			Token:  token,
 			Poller: &tb.LongPoller{Timeout: 10 * time.Second},
 			// ParseMode: tb.ModeMarkdownV2,
-		})
+			URL: tg.Get("url"),
+		}
+		if url := tg.Get("http_proxy"); url != "" {
+			client, clientErr := buildClientWithProxy(url)
+			if clientErr != nil {
+				logs.Warn("telegram代理失败：%v", clientErr)
+				return
+			}
+			settings.Client = client
+		}
+		var err error
+		b, err = tb.NewBot(settings)
 
 		if err != nil {
 			logs.Warn("监听telegram机器人失败：%v", err)
 			return
 		}
-		core.Pushs["tg"] = func(i int, s string) {
-			b.Send(&tb.User{ID: i}, s)
+		core.Pushs["tg"] = func(i interface{}, s string) {
+			b.Send(&tb.User{ID: core.Int(i)}, s)
 		}
-		core.GroupPushs["tg"] = func(i, j int, s string) {
+		core.GroupPushs["tg"] = func(i, _ interface{}, s string) {
 			paths := []string{}
-			ct := &tb.Chat{ID: int64(i)}
+			ct := &tb.Chat{ID: core.Int64(i)}
 			for _, v := range regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(s, -1) {
-				paths = append(paths, core.ExecPath+"/data/images/"+v[1])
+				paths = append(paths, "data/images/"+v[1])
 				s = strings.Replace(s, fmt.Sprintf(`[CQ:image,file=%s]`, v[1]), "", -1)
 			}
 			s = regexp.MustCompile(`\[CQ:([^\[\]]+)\]`).ReplaceAllString(s, "")
@@ -105,7 +134,7 @@ func init() {
 		}
 		b.Handle(tb.OnPhoto, func(m *tb.Message) {
 			filename := fmt.Sprint(time.Now().UnixNano()) + ".image"
-			filepath := core.ExecPath + "/data/images/" + filename
+			filepath := "data/images/" + filename
 			if b.Download(&m.Photo.File, filepath) == nil {
 				m.Text = fmt.Sprintf(`[TG:image,file=%s]`, filename) + m.Caption
 				Handler(m)
@@ -126,7 +155,7 @@ func init() {
 		// 		return
 		// 	}
 		// 	filename := fmt.Sprint(time.Now().UnixNano()) + ".image"
-		// 	filepath := core.ExecPath + "/data/images/" + filename
+		// 	filepath := "data/images/" + filename
 		// 	f, err := os.Create(filepath)
 		// 	if err != nil {
 		// 		return
@@ -143,15 +172,22 @@ func init() {
 }
 
 func (sender *Sender) GetContent() string {
+	if sender.Content != "" {
+		return sender.Content
+	}
 	return sender.Message.Text
 }
 
-func (sender *Sender) GetUserID() int {
+func (sender *Sender) GetUserID() interface{} {
 	return sender.Message.Sender.ID
 }
 
-func (sender *Sender) GetChatID() int {
-	return int(sender.Message.Chat.ID)
+func (sender *Sender) GetChatID() interface{} {
+	if sender.Message.Private() {
+		return 0
+	} else {
+		return int(sender.Message.Chat.ID)
+	}
 }
 
 func (sender *Sender) GetImType() string {
@@ -183,36 +219,6 @@ func (sender *Sender) GetReplySenderUserID() int {
 
 func (sender *Sender) GetRawMessage() interface{} {
 	return sender.Message
-}
-
-func (sender *Sender) SetMatch(ss []string) {
-	sender.matches = [][]string{ss}
-}
-func (sender *Sender) SetAllMatch(ss [][]string) {
-	sender.matches = ss
-}
-
-func (sender *Sender) GetMatch() []string {
-	return sender.matches[0]
-}
-
-func (sender *Sender) GetAllMatch() [][]string {
-	return sender.matches
-}
-
-func (sender *Sender) Get(index ...int) string {
-
-	i := 0
-	if len(index) != 0 {
-		i = index[0]
-	}
-	if len(sender.matches) == 0 {
-		return ""
-	}
-	if len(sender.matches[0]) < i+1 {
-		return ""
-	}
-	return sender.matches[0][i]
 }
 
 func (sender *Sender) IsAdmin() bool {
@@ -249,7 +255,11 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 	} else {
 		r = sender.Message.Chat
 		if !sender.deleted {
-			options = []interface{}{&tb.SendOptions{ReplyTo: sender.Message}}
+			if sender.Message.ReplyTo == nil {
+				options = []interface{}{&tb.SendOptions{ReplyTo: sender.Message}}
+			} else {
+				options = []interface{}{&tb.SendOptions{ReplyTo: sender.Message.ReplyTo}}
+			}
 		}
 	}
 	var err error
@@ -259,6 +269,7 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 	case []byte:
 		rt, err = b.Send(r, string(msg.([]byte)), options...)
 	case string:
+		message := msg.(string)
 		if edit != nil && sender.reply != nil {
 			if *edit == 0 {
 				if sender.reply != nil {
@@ -274,12 +285,49 @@ func (sender *Sender) Reply(msgs ...interface{}) (int, error) {
 			}
 			return sender.reply.ID, nil
 		}
+		paths := []string{}
+		for _, v := range regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(message, -1) {
+			paths = append(paths, v[1])
+			message = strings.Replace(message, fmt.Sprintf(`[CQ:image,file=%s]`, v[1]), "", -1)
+		}
+		if len(paths) > 0 {
+			is := []tb.InputMedia{}
+			for index, path := range paths {
+				if strings.Contains(path, "base64") {
+
+					decodeBytes, err := base64.StdEncoding.DecodeString(strings.Replace(path, "base64://", "", -1))
+					if err != nil {
+						sender.Reply(path[len(path)-20:])
+						sender.Reply(err)
+					}
+					i := &tb.Photo{File: tb.FromReader(bytes.NewReader(decodeBytes))}
+					if index == 0 {
+						i.Caption = message
+					}
+					is = append(is, i)
+				} else {
+					data, err := os.ReadFile("data/images/" + path)
+					if err == nil {
+						url := regexp.MustCompile("(https.*)").FindString(string(data))
+						if url != "" {
+							i := &tb.Photo{File: tb.FromURL(url)}
+							if index == 0 {
+								i.Caption = message
+							}
+							is = append(is, i)
+						}
+					}
+				}
+			}
+			b.SendAlbum(r, is)
+		} else {
+			rt, err = b.Send(r, message, options...)
+		}
 		if replace != nil {
 			b.Delete(&tb.Message{
 				ID: int(*edit),
 			})
 		}
-		rt, err = b.Send(r, msg.(string), options...)
 	case core.ImagePath:
 		f, err := os.Open(string(msg.(core.ImagePath)))
 		if err != nil {
@@ -346,12 +394,4 @@ func (sender *Sender) Disappear(lifetime ...time.Duration) {
 
 func (sender *Sender) Finish() {
 
-}
-
-func (sender *Sender) Continue() {
-	sender.goon = true
-}
-
-func (sender *Sender) IsContinue() bool {
-	return sender.goon
 }

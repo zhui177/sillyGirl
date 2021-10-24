@@ -15,6 +15,8 @@ import (
 
 type JsReply string
 
+var o = NewBucket("otto")
+
 func init() {
 	go func() {
 		time.Sleep(time.Second)
@@ -22,23 +24,24 @@ func init() {
 	}()
 }
 
+var OttoFuncs = map[string]func(string) string{}
+
 func init123() {
-	files, err := ioutil.ReadDir(ExecPath + "/develop/replies")
+	files, err := ioutil.ReadDir("develop/replies")
 	if err != nil {
-		logs.Warn("打开文件夹%s错误，%v", ExecPath+"/develop/replies", err)
+		os.MkdirAll("develop/replies", os.ModePerm)
+		// logs.Warn("打开文件夹%s错误，%v", "develop/replies", err)
 		return
 	}
-	var o = NewBucket("otto")
+
 	get := func(call otto.FunctionCall) (result otto.Value) {
 		key := call.Argument(0).String()
 		value := call.Argument(1).String()
 		result, _ = otto.ToValue(o.Get(key, value))
 		return
 	}
-	set := func(call otto.FunctionCall) interface{} {
-		key := call.Argument(0).String()
-		value := call.Argument(1).String()
-		o.Set(key, value)
+	set := func(key otto.Value, value otto.Value) interface{} {
+		o.Set(key.String(), value.String())
 		return otto.Value{}
 	}
 	push := func(call otto.Value) interface{} {
@@ -112,7 +115,10 @@ func init123() {
 		if v.IsDir() {
 			continue
 		}
-		jr := string(ExecPath + "/develop/replies/" + v.Name())
+		if !strings.Contains(v.Name(), ".js") {
+			continue
+		}
+		jr := string("develop/replies/" + v.Name())
 		data := ""
 		if strings.Contains(jr, "http") {
 			data, err = httplib.Get(jr).String()
@@ -141,8 +147,8 @@ func init123() {
 		if res := regexp.MustCompile(`\[admin:([^\[\]]+)\]`).FindStringSubmatch(data); len(res) != 0 {
 			admin = strings.Trim(res[1], " ") == "true"
 		}
-		if len(rules) == 0 {
-			logs.Warn("回复：%s找不到规则", jr, err)
+		if len(rules) == 0 && cron == "" {
+			logs.Warn("回复：%s无效文件", jr, err)
 			continue
 		}
 		var handler = func(s Sender) interface{} {
@@ -155,6 +161,15 @@ func init123() {
 				return v
 			}
 			vm := otto.New()
+			vm.Set("call", func(name otto.Value, arg otto.Value) interface{} {
+				key := name.String()
+				value := arg.String()
+				if f, ok := OttoFuncs[key]; ok {
+					v, _ := otto.ToValue(f(value))
+					return v
+				}
+				return otto.Value{}
+			})
 			vm.Set("Delete", func() {
 				s.Delete()
 			})

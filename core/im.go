@@ -1,12 +1,15 @@
 package core
 
 import (
+	"errors"
+	"fmt"
+	"sync"
 	"time"
 )
 
 type Sender interface {
-	GetUserID() int
-	GetChatID() int
+	GetUserID() interface{}
+	GetChatID() interface{}
 	GetImType() string
 	GetMessageID() int
 	GetUsername() string
@@ -19,6 +22,7 @@ type Sender interface {
 	GetAllMatch() [][]string
 	Get(...int) string
 	GetContent() string
+	SetContent(string)
 	IsAdmin() bool
 	IsMedia() bool
 	Reply(...interface{}) (int, error)
@@ -27,6 +31,7 @@ type Sender interface {
 	Finish()
 	Continue()
 	IsContinue() bool
+	Await(Sender, func(Sender) interface{}, ...interface{})
 }
 
 type Edit int
@@ -43,21 +48,22 @@ type ImagePath string
 
 type Faker struct {
 	Message string
-	matches [][]string
 	Type    string
-	UserID  int
+	UserID  interface{}
+	ChatID  interface{}
+	BaseSender
 }
 
 func (sender *Faker) GetContent() string {
 	return sender.Message
 }
 
-func (sender *Faker) GetUserID() int {
+func (sender *Faker) GetUserID() interface{} {
 	return sender.UserID
 }
 
-func (sender *Faker) GetChatID() int {
-	return 0
+func (sender *Faker) GetChatID() interface{} {
+	return sender.ChatID
 }
 
 func (sender *Faker) GetImType() string {
@@ -85,35 +91,6 @@ func (sender *Faker) GetReplySenderUserID() int {
 
 func (sender *Faker) GetRawMessage() interface{} {
 	return sender.Message
-}
-
-func (sender *Faker) SetMatch(ss []string) {
-	sender.matches = [][]string{ss}
-}
-func (sender *Faker) SetAllMatch(ss [][]string) {
-	sender.matches = ss
-}
-
-func (sender *Faker) GetMatch() []string {
-	return sender.matches[0]
-}
-
-func (sender *Faker) GetAllMatch() [][]string {
-	return sender.matches
-}
-
-func (sender *Faker) Get(index ...int) string {
-	i := 0
-	if len(index) != 0 {
-		i = index[0]
-	}
-	if len(sender.matches) == 0 {
-		return ""
-	}
-	if len(sender.matches[0]) < i+1 {
-		return ""
-	}
-	return sender.matches[0][i]
 }
 
 func (sender *Faker) IsAdmin() bool {
@@ -156,10 +133,166 @@ func (sender *Faker) Finish() {
 
 }
 
-func (sender *Faker) Continue() {
+type BaseSender struct {
+	matches [][]string
+	goon    bool
+	child   Sender
+	Content string
+}
+
+func (sender *BaseSender) SetMatch(ss []string) {
+	sender.matches = [][]string{ss}
+}
+func (sender *BaseSender) SetAllMatch(ss [][]string) {
+	sender.matches = ss
+}
+
+func (sender *BaseSender) SetContent(content string) {
+	sender.Content = content
+}
+
+func (sender *BaseSender) GetMatch() []string {
+	return sender.matches[0]
+}
+
+func (sender *BaseSender) GetAllMatch() [][]string {
+	return sender.matches
+}
+
+func (sender *BaseSender) Continue() {
+	sender.goon = true
+}
+
+func (sender *BaseSender) IsContinue() bool {
+	return sender.goon
+}
+
+func (sender *BaseSender) Get(index ...int) string {
+	i := 0
+	if len(index) != 0 {
+		i = index[0]
+	}
+	if len(sender.matches) == 0 {
+		return ""
+	}
+	if len(sender.matches[0]) < i+1 {
+		return ""
+	}
+	return sender.matches[0][i]
+}
+
+func (sender *BaseSender) Delete() error {
+	return nil
+}
+
+func (sender *BaseSender) Disappear(lifetime ...time.Duration) {
 
 }
 
-func (sender *Faker) IsContinue() bool {
-	return true
+func (sender *BaseSender) Finish() {
+
+}
+
+func (sender *BaseSender) IsMedia() bool {
+	return false
+}
+
+func (sender *BaseSender) GetRawMessage() interface{} {
+	return nil
+}
+
+func (sender *BaseSender) IsReply() bool {
+	return false
+}
+
+func (sender *BaseSender) GetMessageID() int {
+	return 0
+}
+
+func (sender *BaseSender) GetUserID() interface{} {
+	return nil
+}
+func (sender *BaseSender) GetChatID() interface{} {
+	return nil
+}
+func (sender *BaseSender) GetImType() string {
+	return ""
+}
+
+var TimeOutError = errors.New("指令超时")
+var InterruptError = errors.New("被其他指令中断")
+
+var waits sync.Map
+
+type Carry struct {
+	Chan    chan interface{}
+	Pattern string
+	Result  chan interface{}
+	Sender  Sender
+}
+
+type forGroup string
+
+var ForGroup forGroup
+
+func (_ *BaseSender) Await(sender Sender, callback func(Sender) interface{}, params ...interface{}) {
+	c := &Carry{}
+	timeout := time.Second * 20
+	var handleErr func(error)
+	var fg *forGroup
+	for _, param := range params {
+		switch param.(type) {
+		case string:
+			c.Pattern = param.(string)
+		case time.Duration:
+			du := param.(time.Duration)
+			if du != 0 {
+				timeout = du
+			}
+		case func() string:
+			callback = param.(func(Sender) interface{})
+
+		case func(error):
+			handleErr = param.(func(error))
+		case forGroup:
+			a := param.(forGroup)
+			fg = &a
+		}
+	}
+	if callback == nil {
+		return
+	}
+	if c.Pattern == "" {
+		c.Pattern = `[\s\S]*`
+	}
+	c.Chan = make(chan interface{}, 1)
+	c.Result = make(chan interface{}, 1)
+	key := fmt.Sprintf("u=%v&c=%v&i=%v", sender.GetUserID(), sender.GetChatID(), sender.GetImType())
+	if fg != nil {
+		key += fmt.Sprintf("&t=%v&f=true", time.Now().Unix())
+	}
+	if oc, ok := waits.LoadOrStore(key, c); ok {
+		oc.(*Carry).Chan <- InterruptError
+	}
+	select {
+	case result := <-c.Chan:
+		switch result.(type) {
+		case Sender:
+			waits.Delete(key)
+			c.Result <- callback(result.(Sender)) //, nil
+			return
+		case error:
+			waits.Delete(key)
+			if handleErr != nil {
+				handleErr(result.(error))
+			}
+			c.Result <- nil //
+		}
+	case <-time.After(timeout):
+		waits.Delete(key)
+		if handleErr != nil {
+			handleErr(TimeOutError)
+		}
+		c.Result <- nil
+	}
 }
